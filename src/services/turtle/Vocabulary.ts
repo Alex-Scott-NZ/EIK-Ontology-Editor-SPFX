@@ -10,6 +10,7 @@ export const SEM = 'http://www.smartlogic.com/2014/08/semaphore-core#';
 export const RDF_TYPE = RDF + 'type';
 
 export const RDFS_LABEL = RDFS + 'label';
+export const RDFS_COMMENT = RDFS + 'comment';
 export const RDFS_DOMAIN = RDFS + 'domain';
 export const RDFS_RANGE = RDFS + 'range';
 export const RDFS_SUBCLASS_OF = RDFS + 'subClassOf';

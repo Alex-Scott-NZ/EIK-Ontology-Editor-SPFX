@@ -24,6 +24,16 @@ function num(v: SqlValue): number | undefined {
   return v === null || v === undefined ? undefined : Number(v);
 }
 
+/** flags_json holds every Semaphore predicate not promoted to a column. */
+function parseFlags(v: SqlValue): { [k: string]: string | string[] } | undefined {
+  if (v === null || v === undefined) return undefined;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return undefined;
+  }
+}
+
 export class OntologyDatabase {
   private _db: Database;
 
@@ -158,14 +168,15 @@ export class OntologyDatabase {
 
   public getLabels(conceptId: number): ILabel[] {
     return this._rows(
-      `SELECT id, label_property, literal_form, lang FROM labels
+      `SELECT id, label_property, literal_form, lang, flags_json FROM labels
        WHERE concept_id = ? ORDER BY label_property, literal_form`,
       [conceptId]
     ).map(r => ({
       id: Number(r[0]),
       labelProperty: String(r[1]),
       literalForm: String(r[2]),
-      lang: str(r[3])
+      lang: str(r[3]),
+      flags: parseFlags(r[4])
     }));
   }
 
@@ -232,19 +243,34 @@ export class OntologyDatabase {
   // -- Schema ----------------------------------------------------------------
 
   public getClasses(): IOntologyClass[] {
-    return this._rows('SELECT id, uri, label, definition, parent_class_id FROM classes ORDER BY label')
-      .map(r => ({
-        id: Number(r[0]),
-        uri: String(r[1]),
-        label: str(r[2]),
-        definition: str(r[3]),
-        parentClassId: num(r[4])
-      }));
+    return this._rows(
+      'SELECT id, uri, label, definition, parent_class_id, flags_json FROM classes ORDER BY label'
+    ).map(r => ({
+      id: Number(r[0]),
+      uri: String(r[1]),
+      label: str(r[2]),
+      definition: str(r[3]),
+      parentClassId: num(r[4]),
+      flags: parseFlags(r[5])
+    }));
+  }
+
+  /** Semaphore's tree swatch for a class, as `#rrggbb`, if one was set. */
+  public getClassColour(cls: IOntologyClass): string | undefined {
+    if (!cls.flags) return undefined;
+    for (const key of Object.keys(cls.flags)) {
+      if (key.indexOf('#color') !== -1) {
+        const v = cls.flags[key];
+        return `#${Array.isArray(v) ? v[0] : v}`;
+      }
+    }
+    return undefined;
   }
 
   public getProperties(): IOntologyProperty[] {
     return this._rows(
-      `SELECT id, uri, label, domain_class_id, range_class_id, inverse_property_id, sub_property_of
+      `SELECT id, uri, label, domain_class_id, range_class_id, inverse_property_id,
+              sub_property_of, definition, comment, flags_json
        FROM properties WHERE is_label_property = 0 ORDER BY label`
     ).map(r => ({
       id: Number(r[0]),
@@ -253,7 +279,10 @@ export class OntologyDatabase {
       domainClassId: num(r[3]),
       rangeClassId: num(r[4]),
       inversePropertyId: num(r[5]),
-      subPropertyOf: str(r[6])
+      subPropertyOf: str(r[6]),
+      definition: str(r[7]),
+      comment: str(r[8]),
+      flags: parseFlags(r[9])
     }));
   }
 
@@ -264,8 +293,10 @@ export class OntologyDatabase {
    */
   public getAllowedProperties(conceptId: number): IAllowedProperty[] {
     return this._rows(
-      `SELECT ap.property_id, ap.label, ap.range_class_id, rc.label
+      `SELECT ap.property_id, ap.label, ap.range_class_id, rc.label,
+              COALESCE(p.definition, p.comment)
        FROM v_allowed_properties ap
+       JOIN properties p ON p.id = ap.property_id
        LEFT JOIN classes rc ON rc.id = ap.range_class_id
        WHERE ap.concept_id = ?
        ORDER BY ap.label`,
@@ -274,7 +305,8 @@ export class OntologyDatabase {
       propertyId: Number(r[0]),
       label: str(r[1]),
       rangeClassId: num(r[2]),
-      rangeClassName: str(r[3])
+      rangeClassName: str(r[3]),
+      definition: str(r[4])
     }));
   }
 

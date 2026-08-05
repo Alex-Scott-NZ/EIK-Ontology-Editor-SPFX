@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import initSqlJs, { Database } from 'sql.js';
-import { parseTurtle, ITurtleSubject, ITurtleTerm } from '../src/services/turtle/TurtleParser';
+import { parseTurtle, ITurtleSubject } from '../src/services/turtle/TurtleParser';
 import * as V from '../src/services/turtle/Vocabulary';
 
 interface IStats { [key: string]: number }
@@ -83,15 +83,36 @@ async function main(): Promise<void> {
   insPrefix.free();
 
   // -- Classes (two passes: rows first, then subClassOf links) ---------------
+  /**
+   * Collect every predicate on a subject except those given, as a JSON blob.
+   * Guarantees no Semaphore vocabulary is dropped just because we have not
+   * modelled it — the web part is replacing Semaphore, so anything lost here
+   * ceases to exist.
+   */
+  function residualFlags(s: ITurtleSubject, handled: string[]): string | null {
+    const flags: { [k: string]: string | string[] } = {};
+    for (const pred of Object.keys(s.predicates)) {
+      if (handled.indexOf(pred) !== -1) continue;
+      const vals = s.predicates[pred].map(t => t.value);
+      flags[pred] = vals.length === 1 ? vals[0] : vals;
+    }
+    return Object.keys(flags).length ? JSON.stringify(flags) : null;
+  }
+
   const classId: { [uri: string]: number } = {};
-  const insClass = db.prepare('INSERT INTO classes (uri, label, definition) VALUES (?, ?, ?)');
+  const insClass = db.prepare(
+    'INSERT INTO classes (uri, label, definition, flags_json) VALUES (?, ?, ?, ?)'
+  );
+  const CLASS_HANDLED = [V.RDF_TYPE, V.RDFS_LABEL, V.SKOS_DEFINITION, V.RDFS_SUBCLASS_OF];
   for (const uri of classUris) {
     const s = parsed.subjects[uri];
     const label = (s.predicates[V.RDFS_LABEL] || [])[0];
     const def = (s.predicates[V.SKOS_DEFINITION] || [])[0];
-    insClass.run([uri, label ? label.value : null, def ? def.value : null]);
+    const flags = residualFlags(s, CLASS_HANDLED);
+    insClass.run([uri, label ? label.value : null, def ? def.value : null, flags]);
     classId[uri] = db.exec('SELECT last_insert_rowid()')[0].values[0][0] as number;
     bump('classes');
+    if (flags) bump('classesWithResidualFlags');
   }
   insClass.free();
 
@@ -108,14 +129,24 @@ async function main(): Promise<void> {
   // -- Properties (two passes: rows first, then inverseOf links) -------------
   const propId: { [uri: string]: number } = {};
   const insProp = db.prepare(
-    'INSERT INTO properties (uri, label, domain_class_id, range_class_id, sub_property_of, is_label_property) VALUES (?, ?, ?, ?, ?, ?)'
+    `INSERT INTO properties
+       (uri, label, domain_class_id, range_class_id, sub_property_of, is_label_property,
+        definition, comment, flags_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
+  const PROP_HANDLED = [
+    V.RDF_TYPE, V.RDFS_LABEL, V.RDFS_DOMAIN, V.RDFS_RANGE,
+    V.RDFS_SUBPROPERTY_OF, V.OWL_INVERSE_OF, V.SKOS_DEFINITION, V.RDFS_COMMENT
+  ];
   for (const uri of propertyUris) {
     const s = parsed.subjects[uri];
     const label = (s.predicates[V.RDFS_LABEL] || [])[0];
     const domain = (s.predicates[V.RDFS_DOMAIN] || [])[0];
     const range = (s.predicates[V.RDFS_RANGE] || [])[0];
     const sub = (s.predicates[V.RDFS_SUBPROPERTY_OF] || [])[0];
+    const def = (s.predicates[V.SKOS_DEFINITION] || [])[0];
+    const comment = (s.predicates[V.RDFS_COMMENT] || [])[0];
+    const flags = residualFlags(s, PROP_HANDLED);
 
     // range skos:Concept means "any concept" and is stored as NULL.
     const rangeUri = range && range.kind === 'iri' ? range.value : undefined;
@@ -127,11 +158,16 @@ async function main(): Promise<void> {
       domain && domain.kind === 'iri' && classId[domain.value] !== undefined ? classId[domain.value] : null,
       rangeUri && classId[rangeUri] !== undefined ? classId[rangeUri] : null,
       sub ? sub.value : null,
-      isLabelProp
+      isLabelProp,
+      def ? def.value : null,
+      comment ? comment.value : null,
+      flags
     ]);
     propId[uri] = db.exec('SELECT last_insert_rowid()')[0].values[0][0] as number;
     bump('properties');
     if (isLabelProp) bump('labelProperties');
+    if (def || comment) bump('propertiesWithDefinition');
+    if (flags) bump('propertiesWithResidualFlags');
   }
   insProp.free();
 

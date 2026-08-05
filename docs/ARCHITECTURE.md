@@ -48,19 +48,28 @@ at the end" is not a differentiator.
 tree, a filtered list, or a "what may link here" lookup. The fidelity gap is the only
 real cost of SQLite, and Decision 2 closes it.
 
-## Decision 2 — model what we edit, pass through what we don't
+## Decision 2 — preserve by default, model what we edit
 
 Fidelity risk is not in editing SQLite; it is in *regenerating Turtle from a schema
 that didn't capture everything*.
 
 So: concepts, hierarchy, relationships, labels and annotations get proper tables.
-**Every triple not claimed by those tables is stored verbatim in
-`passthrough_triples`** — Semaphore matching flags, SPIN imports, concept-scheme
-wiring, the model header.
+Then two catch-alls ensure nothing can be dropped merely because it was not
+anticipated:
 
-Export = regenerate the modelled entities + append the passthrough. Fidelity no
-longer depends on modelling 100% of Semaphore's vocabulary up front, which is the
-failure mode that would otherwise bite six months in.
+- `classes`, `properties` and `labels` each carry a **`flags_json`** blob holding
+  every predicate on that subject not promoted to a column.
+- **Everything else lands verbatim in `passthrough_triples`** — concept schemes,
+  SPIN imports, the model header.
+
+Export = regenerate the modelled entities + replay flags + append passthrough.
+
+This inversion matters. The first importer used fixed columns and discarded
+unrecognised predicates; it silently lost 39 triples including the taxonomy
+team's written definitions of the relationship types. No error, all counts
+matching. Unknown vocabulary is now preserved by default rather than dropped by
+default. See [REPLACING-SEMAPHORE.md](REPLACING-SEMAPHORE.md) "What was nearly
+lost".
 
 ## Decision 3 — store one row per logical relationship, derive the inverse
 
@@ -121,18 +130,26 @@ The change-set profile matters because of an open question below.
 
 ---
 
-## Open question that should be settled before building the export
+## SETTLED (2026-08-05): this web part replaces Semaphore
 
-**Is Semaphore still the master, or is this web part becoming the master?**
+Semaphore is the master today, but this tool takes over from it. Consequences:
 
-- *Semaphore stays master* → do not plan to re-ingest a 21 MB foreign full-graph
-  export; Semaphore will not take it cleanly. The change-set profile becomes the
-  primary output and `passthrough_triples` matters less.
-- *This web part becomes master* → full Turtle is the archival/interchange format
-  and passthrough fidelity is essential.
+- **Full-fidelity Turtle export is mandatory and should be built early.** It is
+  both the proof the migration is reversible and the archival format if this
+  tool is itself replaced one day.
+- **`passthrough_triples` is load-bearing**, not a safety net. Unknown
+  vocabulary must be preserved by default, because there is no longer a system
+  of record holding the parts we did not model.
+- **Constraints Semaphore enforced in its UI must be reimplemented here** —
+  notably unique-label-within-class. When the tool goes, its rules go with it.
+- The change-set profile drops to secondary: useful as a migration audit trail
+  rather than as something to re-apply in Semaphore.
 
-The architecture serves both; only the emphasis changes. **Decide before writing the
-export.**
+Full analysis of what must survive, including the matching flags and field
+rules: [REPLACING-SEMAPHORE.md](REPLACING-SEMAPHORE.md).
+
+Coverage is currently **100% of 202,693 triples**, enforced by
+`npm --prefix tools run audit`, which exits non-zero if anything is dropped.
 
 ---
 

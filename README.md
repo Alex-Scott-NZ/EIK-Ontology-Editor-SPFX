@@ -19,9 +19,24 @@ Full audit: [docs/LEGACY-AUDIT.md](docs/LEGACY-AUDIT.md).
 | Doc | What it covers |
 |---|---|
 | [docs/ONTOLOGY-MODEL.md](docs/ONTOLOGY-MODEL.md) | How the model is represented: triples, concepts, classes, `skos:broader`, domain/range/inverse, SKOS-XL labels. Start here if RDF is unfamiliar. |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions and their reasoning, plus the one open question to settle. |
+| [docs/REPLACING-SEMAPHORE.md](docs/REPLACING-SEMAPHORE.md) | **The embedded knowledge that must survive** — matching flags, schema definitions, field rules, and the constraints Semaphore enforced that this tool must now enforce. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions and their reasoning. |
 | [docs/LEGACY-AUDIT.md](docs/LEGACY-AUDIT.md) | What the old pipeline got right and wrong, and what carries forward. |
 | [tools/schema.sql](tools/schema.sql) | The database schema, commented with the reason for each choice. |
+
+## This tool replaces Semaphore
+
+Semaphore is the master today; this web part takes over from it. That makes
+fidelity the primary constraint rather than a nice-to-have — **anything the
+importer fails to carry across stops existing** once Semaphore is switched off.
+
+Coverage is currently **100% of 202,693 triples**:
+
+```bash
+npm --prefix tools run audit     # exits non-zero if any triple is unaccounted for
+```
+
+Run it in CI. It is the regression test that keeps this true.
 
 ## Layout
 
@@ -132,12 +147,20 @@ against a real SharePoint page.
 
 ## Before editing goes live
 
-- [ ] Settle the open question in ARCHITECTURE.md — is Semaphore still the
-      master, or is this web part becoming it? It decides which export profile
-      is primary.
+- [ ] **Build the Turtle exporter early**, not last — it is the proof the
+      migration is reversible. Then add a round-trip test: original TTL →
+      SQLite → TTL compared as triple sets. Coverage proves nothing is dropped
+      going *in*; only a round trip proves it comes back out.
+- [ ] Reimplement the constraints Semaphore enforced in its UI, especially
+      unique-label-**within-class** (a global rule would reject valid existing
+      data — five labels are legitimately shared across classes).
+- [ ] Decide whether IR keeps running Semaphore's classifier. It determines
+      whether the 16,000+ per-label matching flags are live configuration
+      needing editing UI, or historical record to preserve untouched. Biggest
+      remaining scope question.
+- [ ] Agree a URI-minting rule for new concepts — five namespaces exist today.
 - [ ] Write the write-layer, journalling every change to the `changes` table.
-- [ ] Build the Turtle exporter (modelled entities + passthrough, inverses
-      materialised).
+      Editing must not silently normalise URIs or bulk-default label flags.
 - [ ] Sanitise HTML before rendering notes as markup — Semaphore stores them as
       HTML fragments and this web part will make them editable. Currently
       stripped to text.

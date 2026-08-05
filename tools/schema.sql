@@ -21,7 +21,11 @@ CREATE TABLE classes (
   uri             TEXT NOT NULL UNIQUE,
   label           TEXT,
   definition      TEXT,
-  parent_class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL
+  parent_class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+  -- Every other predicate found on the class, verbatim (e.g. sem:color, the
+  -- swatch Semaphore shows in its tree). Blob rather than columns so a
+  -- Semaphore vocabulary we have not seen can never be silently dropped.
+  flags_json      TEXT
 );
 CREATE INDEX idx_classes_parent ON classes(parent_class_id);
 
@@ -45,7 +49,15 @@ CREATE TABLE properties (
   sub_property_of     TEXT,
   -- 1 = points at a skosxl:Label resource (Acronym, HasShoulderCode, ...)
   -- rather than at another concept; those instances land in `labels`.
-  is_label_property   INTEGER NOT NULL DEFAULT 0
+  is_label_property   INTEGER NOT NULL DEFAULT 0,
+  -- What this relationship type MEANS, as written by the taxonomy team
+  -- (skos:definition / rdfs:comment). This is knowledge that exists nowhere
+  -- else once Semaphore is retired — surface it in the editor's picker.
+  definition          TEXT,
+  comment             TEXT,
+  -- Every remaining predicate verbatim: sem:autocompletion, sem:conceptMapping,
+  -- sem:defaultValue and anything else Semaphore attaches.
+  flags_json          TEXT
 );
 CREATE INDEX idx_properties_domain  ON properties(domain_class_id);
 CREATE INDEX idx_properties_range   ON properties(range_class_id);

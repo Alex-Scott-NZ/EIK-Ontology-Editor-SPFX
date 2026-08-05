@@ -6,6 +6,8 @@ export interface IOntologyClass {
   label: string | undefined;
   definition: string | undefined;
   parentClassId: number | undefined;
+  /** Semaphore extras kept verbatim, e.g. `color` — the tree swatch users navigate by. */
+  flags: { [predicateUri: string]: string | string[] } | undefined;
 }
 
 export interface IOntologyProperty {
@@ -19,6 +21,14 @@ export interface IOntologyProperty {
   /** owl:inverseOf. undefined = genuinely one-directional. */
   inversePropertyId: number | undefined;
   subPropertyOf: string | undefined;
+  /**
+   * What this relationship type means, as written by the taxonomy team. Exists
+   * nowhere else once Semaphore is retired — show it in the picker.
+   */
+  definition: string | undefined;
+  comment: string | undefined;
+  /** Field rules Semaphore enforced: changeable, unique, noteRange, defaultValue. */
+  flags: { [predicateUri: string]: string | string[] } | undefined;
 }
 
 export interface IConcept {
@@ -45,6 +55,12 @@ export interface ILabel {
   labelProperty: string;
   literalForm: string;
   lang: string | undefined;
+  /**
+   * Per-label text-matching instructions (stemming, caseSensitivity,
+   * rulebaseBehaviour, rulebaseInfluence, ...). Set deliberately, one term at a
+   * time — never bulk-default these. See docs/REPLACING-SEMAPHORE.md section 3.
+   */
+  flags: { [predicateUri: string]: string | string[] } | undefined;
 }
 
 export interface IAnnotation {
@@ -76,6 +92,8 @@ export interface IAllowedProperty {
   /** undefined = any concept may be the target. */
   rangeClassId: number | undefined;
   rangeClassName: string | undefined;
+  /** The taxonomy team's own note on when to use this. Show it in the picker. */
+  definition: string | undefined;
 }
 
 export interface IOntologyStats {
