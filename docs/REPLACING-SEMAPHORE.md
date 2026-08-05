@@ -65,10 +65,24 @@ preserved but never read, which is the same as losing them.
 
 ### 3. How text should be matched — the largest hidden asset
 
-Semaphore is not only a taxonomy; it is a text-classification engine, and the
-model carries per-label instructions for how each term should be matched in
-documents. This is by far the biggest body of embedded knowledge, and it is
-invisible in any CSV export:
+Semaphore is not only a taxonomy; it reads documents and tags them with
+concepts automatically. The settings on each label are the instructions for
+**how to recognise that concept in text**. This is by far the biggest body of
+embedded knowledge, and it is invisible in any CSV export.
+
+One concept, three labels, three different configurations:
+
+```
+Concept: Ground 5 - high cost of contact worksheet
+
+  "IR470A"                                     caseSensitive, stemmingOff
+  "IR 470A"                                    caseSensitive, stemmingOff, exactPhrase
+  "Ground 5 - high cost of contact worksheet"  exactPhrase
+```
+
+A document containing `IR470A` is tagged with that concept; one containing
+`ir470a` is not — deliberately, because the lowercase form is more likely noise
+than a real form reference.
 
 | Flag | Labels | Values seen |
 |---|---|---|
@@ -82,16 +96,52 @@ invisible in any CSV export:
 | `rulebaseInfluence` | 271 | None 168 / High 77 / Low 17 / TagIfPresent 9 |
 | `characterEscaping` | 7 | EscapeSpecialCharacters |
 
-Read the minority values, not the majority: 9 labels stem, 21 are
-case-insensitive, 77 have high rulebase influence. Someone made those calls
-deliberately, one term at a time. A bulk default would erase the decisions while
-appearing to preserve the data.
+Read the minority values, not the majority. Each was set deliberately, one term
+at a time, and a bulk default would erase the decisions while appearing to
+preserve the data:
 
-All are held in `labels.flags_json` and round-trip intact. **Whether the new
-editor lets you *edit* them depends on whether IR still runs Semaphore's
-classifier downstream — settle that separately from this migration.** If the
-classifier goes too, these become historical record; if it stays, they are live
-configuration and the editor needs UI for them.
+- **Stemming on (9)** — `Asset retiring`, `Tax exemption`, `Logging incident`.
+  Phrases where variants are wanted ("asset retired", "tax exemptions").
+  Everything else is exact, because stemming a form code produces nonsense.
+- **Case-insensitive (21)** — `KiwiSaver`, `BEFU`, `HYEFU`,
+  `Working for Families tax credit`. Terms people genuinely type inconsistently.
+- **rulebaseInfluence High (77)** — `Contents of this Cabinet paper`,
+  `Recommend that the Cabinet`. Phrases that are near-proof of what a document
+  is.
+- **TagIfPresent (9)** — `CONTRIBUTION_HOLIDAY_EXPIRY_DT` and similar database
+  field names: if it appears at all, that settles it.
+- **rulebaseAction DoNotGenerate (1,363)** — "never auto-tag with this". Almost
+  entirely the GDA7 retention classes, and it pairs exactly with the note those
+  concepts carry: *"GDA7 Classes not used for auto-categorisation. Too difficult
+  for system to assess."* The note is the human reasoning; the flag is that
+  reasoning enforced in the engine. Same decision, stored in two places — change
+  one without the other and they contradict.
+
+#### Some "labels" are match patterns, not names
+
+227 labels contain wildcard syntax rather than readable text:
+
+```
+FIU-INFO-####     matches FIU-INFO-1234
+CAB-##-           matches CAB-12-
+ADV~~~~~IR*       BN~~~~/*       \Intranet\       $orted Money Week
+```
+
+This is why `characterEscaping = EscapeSpecialCharacters` exists on 7 labels —
+for terms containing characters that would otherwise be read as wildcards.
+
+**Checked specifically: none of the 227 is a preferred label.** They are
+confined to three roles — `Evidence` (177), `Has-code` (40), `NotInNPT` (10) —
+so display names are clean.
+
+That is a direct UI requirement. Someone seeing `FIU-INFO-####` in an Evidence
+field will reasonably assume it is corrupted text and "fix" it, silently
+destroying a matching rule. **Mark those fields as patterns or make them
+read-only; do not present them as ordinary free text.** The preferred-label
+field is safe to edit normally.
+
+All settings are held in `labels.flags_json` and round-trip intact regardless of
+what is decided below.
 
 ### 4. How the editing tool should behave — field rules
 
@@ -179,9 +229,22 @@ demoting real relationships to opaque triples.
 
 ## Open, and worth deciding early
 
-- **Does IR keep running Semaphore's classifier?** Decides whether the matching
-  flags are live configuration needing editing UI, or historical record to
-  preserve untouched. This is the single biggest scope question remaining.
+- **When Semaphore goes, does anything downstream still consume this model** —
+  document tagging, search, auto-classification? This does **not** affect the
+  data: the matching settings are preserved either way. It affects two other
+  things:
+  1. Whether a label created in the new editor needs its matching settings set.
+     If something still consumes them, a new label with no flags is subtly
+     broken — present in the model but behaving unlike its neighbours. If
+     nothing consumes them, a bare new label is fine and the existing flags are
+     history.
+  2. Whether the export needs to be *ingestible* by a still-running classifier,
+     which is a far stronger constraint than merely being valid Turtle.
+
+  Semaphore is a suite, not one program: the model editor is one part, the
+  classification engine another. "Replacing Semaphore" could mean either just
+  the editor or the whole suite, and the exporter's specification differs
+  completely between those.
 - **Who owns URI minting for new concepts?** Five namespaces exist; new
   concepts need a rule. Recommend one new namespace for anything created here,
   so provenance stays visible.
