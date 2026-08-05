@@ -1,0 +1,18 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "plusBeta": false,
+    "isCreatingSolution": true,
+    "nodeVersion": "22.23.1",
+    "sdksVersions": {},
+    "version": "1.21.1",
+    "libraryName": "eik-ontology-editor",
+    "libraryId": "300b84f5-c3f6-45e6-8407-a1890a9aae21",
+    "environment": "spo",
+    "packageManager": "npm",
+    "solutionName": "EIK-Ontology-Editor",
+    "solutionShortDescription": "Graphical editor for the Inland Revenue ontology",
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "componentType": "webpart"
+  }
+}

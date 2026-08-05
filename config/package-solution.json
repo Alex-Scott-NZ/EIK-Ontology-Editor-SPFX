@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "eik-ontology-editor-client-side-solution",
+    "id": "300b84f5-c3f6-45e6-8407-a1890a9aae21",
+    "version": "0.1.0.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "developer": {
+      "name": "",
+      "websiteUrl": "",
+      "privacyUrl": "",
+      "termsOfUseUrl": "",
+      "mpnId": "Undefined-1.21.1"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "Graphical editor for the Inland Revenue ontology"
+      },
+      "longDescription": {
+        "default": "Browse and edit the Inland Revenue ontology - concepts, hierarchy, and typed relationships - backed by a SQLite database imported from the Semaphore Turtle export."
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": []
+    },
+    "features": [
+      {
+        "title": "eik-ontology-editor Feature",
+        "description": "The feature that activates elements of the eik-ontology-editor solution.",
+        "id": "c2a375ab-ee18-439e-941b-1b4a9110760b",
+        "version": "0.1.0.0"
+      }
+    ]
+  },
+  "paths": {
+    "zippedPackage": "solution/eik-ontology-editor.sppkg"
+  }
+}

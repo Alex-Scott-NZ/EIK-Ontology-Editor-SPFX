@@ -1,0 +1,20 @@
+{
+  "name": "eik-ontology-tools",
+  "version": "0.1.0.0",
+  "private": true,
+  "description": "Node-side conversion tools: Turtle <-> SQLite. Runs outside the SPFx bundle.",
+  "scripts": {
+    "import": "tsx import-ttl.ts",
+    "import:default": "tsx import-ttl.ts ../InlandRevenueModel.ttl ../data/ontology.sqlite",
+    "verify": "tsx verify-queries.ts"
+  },
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/sql.js": "^1.4.9",
+    "tsx": "^4.19.2",
+    "typescript": "~5.3.3"
+  }
+}

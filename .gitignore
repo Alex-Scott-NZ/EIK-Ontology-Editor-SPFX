@@ -1,0 +1,27 @@
+# Build output
+dist/
+lib/
+solution/
+temp/
+*.sppkg
+
+# Dependencies
+node_modules/
+
+# Generated SQLite database — rebuild with: npm run import-ttl
+data/*.sqlite
+
+# Logs / OS
+npm-debug.log*
+*.log
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/settings.json
+.idea/
+
+# Heft / SPFx caches
+.heft/
+.rush/
+release/

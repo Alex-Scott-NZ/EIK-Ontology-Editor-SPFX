@@ -1,0 +1,106 @@
+.ontologyEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--bodyText);
+}
+
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.panes {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.listPane {
+  flex: 0 0 320px;
+  max-height: 560px;
+  overflow-y: auto;
+  border: 1px solid var(--neutralLight, #edebe9);
+  border-radius: 4px;
+}
+
+.detailPane {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 560px;
+  overflow-y: auto;
+  border: 1px solid var(--neutralLight, #edebe9);
+  border-radius: 4px;
+  padding: 12px 16px;
+}
+
+.conceptRow {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+
+  &:hover {
+    background: var(--neutralLighter, #f3f2f1);
+  }
+
+  &.selected {
+    background: var(--themeLighter, #deecf9);
+    font-weight: 600;
+  }
+}
+
+.conceptClass {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 6px;
+}
+
+.sectionHeading {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.linkRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+
+.propertyName {
+  flex: 0 0 220px;
+  opacity: 0.85;
+}
+
+.inverseBadge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--neutralLighter, #f3f2f1);
+  opacity: 0.75;
+}
+
+.error {
+  padding: 12px;
+  border-left: 3px solid #a4262c;
+  background: #fdf3f4;
+  color: #a4262c;
+}
+
+/* Wide content must scroll inside its own box, never the page. */
+.scrollX {
+  overflow-x: auto;
+}

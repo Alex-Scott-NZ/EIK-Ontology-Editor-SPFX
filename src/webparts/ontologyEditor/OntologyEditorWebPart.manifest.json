@@ -1,0 +1,27 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "c5bbd59d-6b67-462c-86d3-681cb7c2e6f2",
+  "alias": "OntologyEditorWebPart",
+  "componentType": "WebPart",
+
+  "version": "*",
+  "manifestVersion": 2,
+
+  "requiresCustomScript": false,
+  "supportedHosts": ["SharePointWebPart", "TeamsTab", "TeamsPersonalApp"],
+
+  "supportsThemeVariants": true,
+
+  "preconfiguredEntries": [
+    {
+      "groupId": "5c03119e-3074-46fd-976b-c60198311f70",
+      "group": { "default": "Advanced" },
+      "title": { "default": "Ontology Editor" },
+      "description": { "default": "Browse and edit the Inland Revenue ontology" },
+      "officeFabricIconFontName": "Relationship",
+      "properties": {
+        "databaseUrl": "/sites/yoursite/Shared Documents/ontology/ontology.sqlite"
+      }
+    }
+  ]
+}
