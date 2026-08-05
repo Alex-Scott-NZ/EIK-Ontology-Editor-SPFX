@@ -39,9 +39,15 @@ src/webparts/ontologyEditor/    the SPFx web part
 
 ## Getting started
 
-**Node 22 is required** (`engines: >=22.14 <23`). This machine has 22.23.1
-installed but defaults to 20.19.5 in Git Bash — run `nvm use 22.23.1` first, or
-call the binary directly. Per-shell version skew is a known trap here.
+`package.json` declares `engines: >=22.14 <23`, matching what SPFx 1.21
+officially supports. In practice the install and `gulp bundle` both completed
+on Node **20.19.5**, so the engines field is advisory here rather than
+enforced — but prefer Node 22 for anything you intend to ship. This machine has
+22.23.1 installed alongside 20.19.5; Git Bash defaults to 20, so run
+`nvm use 22.23.1` if you want to match the declared version.
+
+The first `npm install` pulls ~2,400 packages and took **27 minutes**. Budget
+for it.
 
 ```bash
 # 1. Build the database from the Turtle export (~15 s)
@@ -109,9 +115,20 @@ exactly, with no relationship stored in both directions.
 
 ## Current state
 
-Working: the Turtle parser (0 unparsed statements against the full file), the
-importer with self-verification, the schema, and a read-only browser web part
-(search, concept detail, both ends of every relationship, navigation).
+Verified working:
+
+- **Turtle parser** — 0 unparsed statements against the full 21 MB export;
+  typechecks clean under `--strict`.
+- **Importer** — self-verifies against the reference counts and passes its
+  integrity checks.
+- **Database queries** — `npm --prefix tools run verify` smoke-tests the
+  queries the web part issues, including the inverse derivation (one stored
+  row correctly yields two view rows) and polyhierarchy.
+- **SPFx build** — `gulp bundle` completes clean, producing
+  `dist/ontology-editor-web-part.js`.
+
+Not yet done: any write path, the Turtle exporter, and running the web part
+against a real SharePoint page.
 
 ## Before editing goes live
 
