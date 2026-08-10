@@ -14,7 +14,7 @@ import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import {
   IConcept, IConceptDetail, IConceptLink, IAllowedProperty,
   ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats,
-  FlagMap
+  FlagMap, ITreeNode
 } from '../../models/IOntology';
 
 /** Nullable column -> undefined, so callers never see null. */
@@ -57,6 +57,11 @@ export class OntologyDatabase {
   ): Promise<OntologyDatabase> {
     const SQL: SqlJsStatic = await initSqlJs({ locateFile: wasmLocateFile });
     return new OntologyDatabase(new SQL.Database(new Uint8Array(bytes)));
+  }
+
+  /** Wrap a Database built in-process — e.g. the result of a Turtle import. */
+  public static fromDatabase(db: Database): OntologyDatabase {
+    return new OntologyDatabase(db);
   }
 
   /** Raw handle, for queries this class does not yet wrap. */
@@ -135,6 +140,116 @@ export class OntologyDatabase {
   public getChildCount(conceptId: number): number {
     const r = this._rows('SELECT COUNT(*) FROM broader WHERE parent_concept_id = ?', [conceptId]);
     return r.length ? Number(r[0][0]) : 0;
+  }
+
+  /**
+   * Roots with their child counts, so the tree can draw expand chevrons without
+   * a follow-up query per node.
+   */
+  public getRootNodes(): ITreeNode[] {
+    return this._rows(
+      `SELECT ${OntologyDatabase.CONCEPT_COLS},
+              (SELECT COUNT(*) FROM broader b2 WHERE b2.parent_concept_id = c.id)
+       FROM concepts c
+       WHERE NOT EXISTS (SELECT 1 FROM broader b WHERE b.concept_id = c.id)
+       ORDER BY c.pref_label`
+    ).map(r => ({ ...this._conceptFromRow(r), childCount: Number(r[5]) }));
+  }
+
+  /** Children with their own child counts. One query per expanded node. */
+  public getChildNodes(conceptId: number): ITreeNode[] {
+    return this._rows(
+      `SELECT ${OntologyDatabase.CONCEPT_COLS},
+              (SELECT COUNT(*) FROM broader b2 WHERE b2.parent_concept_id = c.id)
+       FROM concepts c
+       JOIN broader b ON b.concept_id = c.id
+       WHERE b.parent_concept_id = ?
+       ORDER BY c.pref_label`,
+      [conceptId]
+    ).map(r => ({ ...this._conceptFromRow(r), childCount: Number(r[5]) }));
+  }
+
+  /**
+   * The chain of ancestors from a root down to `conceptId`, for revealing a
+   * search hit in the tree. Follows one parent at each step; with 49
+   * polyhierarchical concepts a node can sit under several branches, and this
+   * returns the first path found.
+   */
+  public getAncestorPath(conceptId: number): number[] {
+    const path: number[] = [];
+    const seen: { [id: number]: true } = {};
+    let current = conceptId;
+    // Bounded: the deepest branch in the model is ~10 levels.
+    for (let depth = 0; depth < 64; depth++) {
+      if (seen[current]) break;              // cycle guard — data is not guaranteed acyclic
+      seen[current] = true;
+      const r = this._rows(
+        'SELECT parent_concept_id FROM broader WHERE concept_id = ? ORDER BY parent_concept_id LIMIT 1',
+        [current]
+      );
+      if (!r.length) break;
+      current = Number(r[0][0]);
+      path.unshift(current);
+    }
+    return path;
+  }
+
+  // -- Flat list (paginated) -------------------------------------------------
+
+  public countConcepts(search?: string): number {
+    if (search && search.trim()) {
+      const like = `%${search.trim()}%`;
+      const r = this._rows(
+        `SELECT COUNT(DISTINCT c.id) FROM concepts c
+         LEFT JOIN labels l ON l.concept_id = c.id
+         WHERE c.pref_label LIKE ? OR l.literal_form LIKE ?`,
+        [like, like]
+      );
+      return r.length ? Number(r[0][0]) : 0;
+    }
+    const r = this._rows('SELECT COUNT(*) FROM concepts');
+    return r.length ? Number(r[0][0]) : 0;
+  }
+
+  /** One page of concepts, alphabetical — the Semaphore "list view". */
+  public listConcepts(offset: number, limit: number, search?: string): IConcept[] {
+    if (search && search.trim()) {
+      const like = `%${search.trim()}%`;
+      return this._rows(
+        `SELECT DISTINCT ${OntologyDatabase.CONCEPT_COLS} FROM concepts c
+         LEFT JOIN labels l ON l.concept_id = c.id
+         WHERE c.pref_label LIKE ? OR l.literal_form LIKE ?
+         ORDER BY c.pref_label LIMIT ? OFFSET ?`,
+        [like, like, limit, offset]
+      ).map(r => this._conceptFromRow(r));
+    }
+    return this._rows(
+      `SELECT ${OntologyDatabase.CONCEPT_COLS} FROM concepts c
+       ORDER BY c.pref_label LIMIT ? OFFSET ?`,
+      [limit, offset]
+    ).map(r => this._conceptFromRow(r));
+  }
+
+  /**
+   * classId -> `#rrggbb`, for the class chips. Semaphore users navigate by
+   * these colours, so they are worth honouring rather than inventing new ones.
+   */
+  public getClassColourMap(): { [classId: number]: string } {
+    const out: { [classId: number]: string } = {};
+    for (const cls of this.getClasses()) {
+      const colour = this.getClassColour(cls);
+      if (colour) out[cls.id] = colour;
+    }
+    return out;
+  }
+
+  /** classId -> label, so lists can show a class chip without N queries. */
+  public getClassLabelMap(): { [classId: number]: string } {
+    const out: { [classId: number]: string } = {};
+    for (const r of this._rows('SELECT id, label FROM classes')) {
+      if (r[1] !== null) out[Number(r[0])] = String(r[1]);
+    }
+    return out;
   }
 
   // -- Lookup ----------------------------------------------------------------

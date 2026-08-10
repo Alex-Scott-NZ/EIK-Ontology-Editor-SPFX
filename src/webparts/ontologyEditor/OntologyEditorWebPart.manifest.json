@@ -20,7 +20,8 @@
       "description": { "default": "Browse and edit the Inland Revenue ontology" },
       "officeFabricIconFontName": "Relationship",
       "properties": {
-        "databaseUrl": "/sites/yoursite/Shared Documents/ontology/ontology.sqlite"
+        "libraryFolder": "",
+        "databaseUrl": ""
       }
     }
   ]

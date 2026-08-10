@@ -52,6 +52,41 @@ src/models/                     TypeScript shapes
 src/webparts/ontologyEditor/    the SPFx web part
 ```
 
+## Using the web part
+
+Add it to a page. On first load it asks where the ontology comes from:
+
+| Source | What happens |
+|---|---|
+| **Open a `.sqlite`** | Loads a database built earlier. Near-instant. |
+| **Import a `.ttl`** | Builds the database in the browser. ~4 s for the full model. |
+
+Either can come from your machine or from a SharePoint library (set the folder
+in the property pane, then **Browse**). Once loaded, **Save .sqlite** downloads
+the database and **Save to library** writes it back to SharePoint, so the import
+is a one-off.
+
+Set **Database to open on load** in the property pane to skip the picker
+entirely and go straight to browsing.
+
+`sql-wasm.wasm` is emitted into the bundle by an asset-module rule in
+`gulpfile.js`, so it deploys with the package — no manual upload.
+
+### Views
+
+Mirrors Semaphore's Details tab (minus the visualiser):
+
+- **Tree** — the 11 top concepts, children fetched on expand. Searching reveals
+  the first hit in place.
+- **List** — flat alphabetical, paged in SQL.
+- **Detail** — two columns. Left: concept class chip (in the model's own
+  `sem:color`), preferred and alternative labels, metadata. Right: related,
+  broader and narrower concepts, plus URI/GUID.
+
+Labels containing classifier wildcard syntax (`FIU-INFO-####`) are shown in
+monospace with a **pattern** badge, so they are not mistaken for corrupted text
+and "fixed" — see [docs/REPLACING-SEMAPHORE.md](docs/REPLACING-SEMAPHORE.md) §3.
+
 ## Getting started
 
 `package.json` declares `engines: >=22.14 <23`, matching what SPFx 1.21

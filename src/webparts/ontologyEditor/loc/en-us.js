@@ -1,9 +1,12 @@
 define([], function () {
   return {
-    PropertyPaneDescription: 'Point the editor at the ontology database file.',
+    PropertyPaneDescription: 'Where the editor looks for ontology files.',
     DataGroupName: 'Data source',
-    DatabaseUrlFieldLabel: 'Database file (server-relative URL)',
+    LibraryFolderFieldLabel: 'Library folder (server-relative)',
+    LibraryFolderFieldDescription:
+      'Folder browsed by the source picker and used by "Save to library", e.g. /sites/knowledge/Shared Documents/ontology',
+    DatabaseUrlFieldLabel: 'Database to open on load (optional)',
     DatabaseUrlFieldDescription:
-      'Server-relative path to ontology.sqlite, e.g. /sites/knowledge/Shared Documents/ontology/ontology.sqlite'
+      'Server-relative path to a .sqlite opened automatically. Leave blank to always show the source picker.'
   };
 });

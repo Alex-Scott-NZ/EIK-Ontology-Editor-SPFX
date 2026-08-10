@@ -11,7 +11,10 @@
     "clean": "gulp clean",
     "test": "gulp test",
     "package": "gulp bundle --ship && gulp package-solution --ship",
-    "import-ttl": "npm --prefix tools run import:default"
+    "import-ttl": "npm --prefix tools run import:default",
+    "gen:schema": "npm --prefix tools run gen:schema",
+    "audit": "npm --prefix tools run audit",
+    "roundtrip": "npm --prefix tools run export && npm --prefix tools run roundtrip"
   },
   "dependencies": {
     "@fluentui/react": "^8.106.4",

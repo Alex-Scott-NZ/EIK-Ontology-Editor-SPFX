@@ -54,6 +54,11 @@ export interface IConcept {
   prefLabel: string | undefined;
 }
 
+/** A concept carrying its child count, so the tree can draw chevrons up front. */
+export interface ITreeNode extends IConcept {
+  childCount: number;
+}
+
 /** A concept plus the bits the detail pane always needs. */
 export interface IConceptDetail extends IConcept {
   className: string | undefined;

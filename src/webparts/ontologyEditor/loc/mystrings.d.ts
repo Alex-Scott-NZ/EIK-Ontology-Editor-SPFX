@@ -3,6 +3,8 @@ declare interface IOntologyEditorWebPartStrings {
   DataGroupName: string;
   DatabaseUrlFieldLabel: string;
   DatabaseUrlFieldDescription: string;
+  LibraryFolderFieldLabel: string;
+  LibraryFolderFieldDescription: string;
 }
 
 declare module 'OntologyEditorWebPartStrings' {

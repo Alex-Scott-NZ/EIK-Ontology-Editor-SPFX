@@ -13,8 +13,10 @@ import OntologyEditor from './components/OntologyEditor';
 import { IOntologyEditorProps } from './components/IOntologyEditorProps';
 
 export interface IOntologyEditorWebPartProps {
-  /** Server-relative URL of the .sqlite file in a document library. */
+  /** Server-relative URL of a .sqlite to open on load. Blank = show the picker. */
   databaseUrl: string;
+  /** Server-relative library folder for browsing sources and saving back. */
+  libraryFolder: string;
 }
 
 export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntologyEditorWebPartProps> {
@@ -25,6 +27,7 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
       OntologyEditor,
       {
         databaseUrl: this.properties.databaseUrl,
+        libraryFolder: this.properties.libraryFolder,
         isDarkTheme: this._isDarkTheme,
         context: this.context
       }
@@ -60,6 +63,10 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
             {
               groupName: strings.DataGroupName,
               groupFields: [
+                PropertyPaneTextField('libraryFolder', {
+                  label: strings.LibraryFolderFieldLabel,
+                  description: strings.LibraryFolderFieldDescription
+                }),
                 PropertyPaneTextField('databaseUrl', {
                   label: strings.DatabaseUrlFieldLabel,
                   description: strings.DatabaseUrlFieldDescription
