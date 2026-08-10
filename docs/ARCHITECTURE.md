@@ -137,6 +137,16 @@ Semaphore is the master today, but this tool takes over from it. Consequences:
 - **Full-fidelity Turtle export is mandatory and should be built early.** It is
   both the proof the migration is reversible and the archival format if this
   tool is itself replaced one day.
+  **BUILT (2026-08-10):** `tools/export-ttl.ts` (full profile) +
+  `tools/roundtrip-diff.ts` (graph-level verifier). Import→export round-trips
+  the source **graph-identically**: 202,693 triples in, 202,693 out, zero lost,
+  zero fabricated (`npm --prefix tools run export && npm --prefix tools run
+  roundtrip`). Achieving this required importer v2: term-preserving flags
+  (`{pred: [{v, t:'i'|'l', lang?, dt?}]}` — IRIs vs literals, language tags,
+  datatypes), property `rdf:type`s kept in flags, unresolvable domain/range
+  (skos:Concept, skosxl:Label, xsd:*) kept in flags, extra concept types and
+  formless labels routed to passthrough, and `annotations.datatype` for
+  `xsd:date`/`xsd:boolean` values.
 - **`passthrough_triples` is load-bearing**, not a safety net. Unknown
   vocabulary must be preserved by default, because there is no longer a system
   of record holding the parts we did not model.
@@ -148,8 +158,15 @@ Semaphore is the master today, but this tool takes over from it. Consequences:
 Full analysis of what must survive, including the matching flags and field
 rules: [REPLACING-SEMAPHORE.md](REPLACING-SEMAPHORE.md).
 
-Coverage is currently **100% of 202,693 triples**, enforced by
-`npm --prefix tools run audit`, which exits non-zero if anything is dropped.
+Coverage is currently **100% of 202,693 triples**, enforced two ways, both
+exiting non-zero on failure:
+
+- `npm --prefix tools run audit` — classifies every source triple by the table
+  it lands in (static claim).
+- `npm --prefix tools run roundtrip` — parses the re-exported Turtle and
+  compares RDF graphs (proof): every original triple must come back out, and
+  the only permitted extras are inverse-pair mirrors the source had dropped
+  (currently zero — the graphs are identical).
 
 ---
 

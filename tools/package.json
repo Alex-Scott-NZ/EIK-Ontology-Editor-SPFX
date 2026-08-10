@@ -7,9 +7,12 @@
     "import": "tsx import-ttl.ts",
     "import:default": "tsx import-ttl.ts ../InlandRevenueModel.ttl ../data/ontology.sqlite",
     "verify": "tsx verify-queries.ts",
-    "audit": "tsx audit-coverage.ts"
+    "audit": "tsx audit-coverage.ts",
+    "export": "tsx export-ttl.ts",
+    "roundtrip": "tsx roundtrip-diff.ts"
   },
   "dependencies": {
+    "eik-ontology-editor": "file:..",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {

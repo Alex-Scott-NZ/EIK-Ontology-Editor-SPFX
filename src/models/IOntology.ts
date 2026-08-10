@@ -1,5 +1,19 @@
 /** Shapes returned by OntologyDatabase. Mirrors tools/schema.sql. */
 
+/**
+ * One preserved RDF term inside a flags blob: `v` value, `t` 'i' (IRI) or
+ * 'l' (literal), optional language tag and datatype IRI. Term-preserving so
+ * the Turtle exporter can replay flags verbatim.
+ */
+export interface IFlagTerm {
+  v: string;
+  t: 'i' | 'l';
+  lang?: string;
+  dt?: string;
+}
+
+export type FlagMap = { [predicateUri: string]: IFlagTerm[] };
+
 export interface IOntologyClass {
   id: number;
   uri: string;
@@ -7,7 +21,7 @@ export interface IOntologyClass {
   definition: string | undefined;
   parentClassId: number | undefined;
   /** Semaphore extras kept verbatim, e.g. `color` — the tree swatch users navigate by. */
-  flags: { [predicateUri: string]: string | string[] } | undefined;
+  flags: FlagMap | undefined;
 }
 
 export interface IOntologyProperty {
@@ -28,7 +42,7 @@ export interface IOntologyProperty {
   definition: string | undefined;
   comment: string | undefined;
   /** Field rules Semaphore enforced: changeable, unique, noteRange, defaultValue. */
-  flags: { [predicateUri: string]: string | string[] } | undefined;
+  flags: FlagMap | undefined;
 }
 
 export interface IConcept {
@@ -60,7 +74,7 @@ export interface ILabel {
    * rulebaseBehaviour, rulebaseInfluence, ...). Set deliberately, one term at a
    * time — never bulk-default these. See docs/REPLACING-SEMAPHORE.md section 3.
    */
-  flags: { [predicateUri: string]: string | string[] } | undefined;
+  flags: FlagMap | undefined;
 }
 
 export interface IAnnotation {
@@ -68,6 +82,8 @@ export interface IAnnotation {
   predicateUri: string;
   value: string | undefined;
   lang: string | undefined;
+  /** xsd datatype IRI (date, boolean, ...); undefined = plain/lang string. */
+  datatype: string | undefined;
 }
 
 /**

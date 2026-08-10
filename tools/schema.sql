@@ -25,6 +25,9 @@ CREATE TABLE classes (
   -- Every other predicate found on the class, verbatim (e.g. sem:color, the
   -- swatch Semaphore shows in its tree). Blob rather than columns so a
   -- Semaphore vocabulary we have not seen can never be silently dropped.
+  -- Format: { predicateUri: [{v, t:'i'|'l', lang?, dt?}] } (term-preserving).
+  -- label/definition also appear here with their language tags; the columns
+  -- above are display conveniences only.
   flags_json      TEXT
 );
 CREATE INDEX idx_classes_parent ON classes(parent_class_id);
@@ -57,7 +60,12 @@ CREATE TABLE properties (
   comment             TEXT,
   -- Every remaining predicate verbatim: sem:autocompletion, sem:conceptMapping,
   -- sem:defaultValue and anything else Semaphore attaches.
-  flags_json          TEXT
+  -- Format: { predicateUri: [{v, t:'i'|'l', lang?, dt?}] } — term-preserving so
+  -- export can re-emit IRIs vs literals with language tags and datatypes intact.
+  flags_json          TEXT,
+  -- 1 = row synthesised by the importer for a predicate with no definition block
+  -- in the source (e.g. skos:related). Export must NOT emit a definition for it.
+  synthesised         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_properties_domain  ON properties(domain_class_id);
 CREATE INDEX idx_properties_range   ON properties(range_class_id);
@@ -146,7 +154,10 @@ CREATE TABLE annotations (
   concept_id    INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
   predicate_uri TEXT NOT NULL,
   value         TEXT,
-  lang          TEXT
+  lang          TEXT,
+  -- xsd datatype IRI (xsd:date, xsd:boolean, ...); NULL = plain/lang string.
+  -- Without this, `"2026-03-27"^^xsd:date` would round-trip as a bare string.
+  datatype      TEXT
 );
 CREATE INDEX idx_annotations_concept   ON annotations(concept_id);
 CREATE INDEX idx_annotations_predicate ON annotations(predicate_uri);

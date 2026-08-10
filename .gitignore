@@ -10,6 +10,8 @@ node_modules/
 
 # Generated SQLite database — rebuild with: npm run import-ttl
 data/*.sqlite
+# Regenerated Turtle export — rebuild with: npm --prefix tools run export
+data/*.ttl
 
 # Logs / OS
 npm-debug.log*

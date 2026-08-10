@@ -84,31 +84,67 @@ async function main(): Promise<void> {
 
   // -- Classes (two passes: rows first, then subClassOf links) ---------------
   /**
-   * Collect every predicate on a subject except those given, as a JSON blob.
-   * Guarantees no Semaphore vocabulary is dropped just because we have not
-   * modelled it — the web part is replacing Semaphore, so anything lost here
-   * ceases to exist.
+   * Term-preserving flag encoding: { predicateUri: [{v, t:'i'|'l', lang?, dt?}] }.
+   * Without kind/lang/datatype the exporter could not tell an IRI from a string
+   * or re-emit "Money"@en / "2026-03-27"^^xsd:date faithfully.
    */
-  function residualFlags(s: ITurtleSubject, handled: string[]): string | null {
-    const flags: { [k: string]: string | string[] } = {};
+  interface IFlagTerm { v: string; t: 'i' | 'l'; lang?: string; dt?: string; }
+  function flagTerm(t: { kind: string; value: string; lang?: string; datatype?: string }): IFlagTerm {
+    const f: IFlagTerm = { v: t.value, t: t.kind === 'iri' ? 'i' : 'l' };
+    if (t.lang) f.lang = t.lang;
+    if (t.datatype) f.dt = t.datatype;
+    return f;
+  }
+
+  /**
+   * Collect every predicate/term on a subject EXCEPT the ones `claim` returns
+   * true for (those live in dedicated columns). Everything else — including
+   * rdfs:label with its language tag, extra rdf:types, unresolvable
+   * domain/range — is preserved verbatim so export can replay it.
+   */
+  function residualFlags(
+    s: ITurtleSubject,
+    claim: (pred: string, t: { kind: string; value: string }, index: number) => boolean
+  ): string | null {
+    const flags: { [k: string]: IFlagTerm[] } = {};
     for (const pred of Object.keys(s.predicates)) {
-      if (handled.indexOf(pred) !== -1) continue;
-      const vals = s.predicates[pred].map(t => t.value);
-      flags[pred] = vals.length === 1 ? vals[0] : vals;
+      const terms = s.predicates[pred];
+      for (let i = 0; i < terms.length; i++) {
+        if (claim(pred, terms[i], i)) continue;
+        (flags[pred] = flags[pred] || []).push(flagTerm(terms[i]));
+      }
     }
     return Object.keys(flags).length ? JSON.stringify(flags) : null;
   }
 
   const classId: { [uri: string]: number } = {};
+  const classDefUris: { [uri: string]: true } = {};
+  for (const uri of classUris) classDefUris[uri] = true;
+
   const insClass = db.prepare(
     'INSERT INTO classes (uri, label, definition, flags_json) VALUES (?, ?, ?, ?)'
   );
-  const CLASS_HANDLED = [V.RDF_TYPE, V.RDFS_LABEL, V.SKOS_DEFINITION, V.RDFS_SUBCLASS_OF];
+  // The single subClassOf stored in parent_class_id per class: the FIRST one
+  // that resolves to another class row. Extra/unresolvable parents stay in flags.
+  const chosenParent: { [uri: string]: string } = {};
   for (const uri of classUris) {
     const s = parsed.subjects[uri];
+    for (const p of (s.predicates[V.RDFS_SUBCLASS_OF] || [])) {
+      if (p.kind === 'iri' && classDefUris[p.value]) { chosenParent[uri] = p.value; break; }
+    }
     const label = (s.predicates[V.RDFS_LABEL] || [])[0];
     const def = (s.predicates[V.SKOS_DEFINITION] || [])[0];
-    const flags = residualFlags(s, CLASS_HANDLED);
+    // Claimed by columns/constants: `a owl:Class` (re-emitted by export) and the
+    // chosen parent. rdfs:label & skos:definition stay in flags (language tags)
+    // AND in the columns (display convenience).
+    let claimedParent = false;
+    const flags = residualFlags(s, (pred, t) => {
+      if (pred === V.RDF_TYPE && t.value === V.OWL_CLASS) return true;
+      if (pred === V.RDFS_SUBCLASS_OF && !claimedParent && t.value === chosenParent[uri]) {
+        claimedParent = true; return true;
+      }
+      return false;
+    });
     insClass.run([uri, label ? label.value : null, def ? def.value : null, flags]);
     classId[uri] = db.exec('SELECT last_insert_rowid()')[0].values[0][0] as number;
     bump('classes');
@@ -118,9 +154,8 @@ async function main(): Promise<void> {
 
   const updClassParent = db.prepare('UPDATE classes SET parent_class_id = ? WHERE id = ?');
   for (const uri of classUris) {
-    const parent = (parsed.subjects[uri].predicates[V.RDFS_SUBCLASS_OF] || [])[0];
-    if (parent && parent.kind === 'iri' && classId[parent.value] !== undefined) {
-      updClassParent.run([classId[parent.value], classId[uri]]);
+    if (chosenParent[uri]) {
+      updClassParent.run([classId[chosenParent[uri]], classId[uri]]);
       bump('classHierarchyEdges');
     }
   }
@@ -134,10 +169,9 @@ async function main(): Promise<void> {
         definition, comment, flags_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
-  const PROP_HANDLED = [
-    V.RDF_TYPE, V.RDFS_LABEL, V.RDFS_DOMAIN, V.RDFS_RANGE,
-    V.RDFS_SUBPROPERTY_OF, V.OWL_INVERSE_OF, V.SKOS_DEFINITION, V.RDFS_COMMENT
-  ];
+  const propDefUris: { [uri: string]: true } = {};
+  for (const uri of propertyUris) propDefUris[uri] = true;
+
   for (const uri of propertyUris) {
     const s = parsed.subjects[uri];
     const label = (s.predicates[V.RDFS_LABEL] || [])[0];
@@ -146,17 +180,40 @@ async function main(): Promise<void> {
     const sub = (s.predicates[V.RDFS_SUBPROPERTY_OF] || [])[0];
     const def = (s.predicates[V.SKOS_DEFINITION] || [])[0];
     const comment = (s.predicates[V.RDFS_COMMENT] || [])[0];
-    const flags = residualFlags(s, PROP_HANDLED);
 
     // range skos:Concept means "any concept" and is stored as NULL.
     const rangeUri = range && range.kind === 'iri' ? range.value : undefined;
     const isLabelProp = rangeUri === V.SKOSXL_LABEL ? 1 : 0;
 
+    const domainResolved = domain && domain.kind === 'iri' && classId[domain.value] !== undefined;
+    const rangeResolved = rangeUri !== undefined && classId[rangeUri] !== undefined;
+
+    // Claimed by columns: the FIRST domain/range only when it resolved to a
+    // class row (skos:Concept / skosxl:Label / xsd:* ranges stay in flags —
+    // previously they were dropped, making NULL ambiguous on export), the first
+    // subPropertyOf, and every inverseOf that resolves (linked in pass two).
+    // rdf:type is NOT claimed: owl:ObjectProperty vs owl:DatatypeProperty vs
+    // sem:AlwaysVisibleProperty must survive, and there is no kind column.
+    let claimedDomain = false, claimedRange = false, claimedSub = false;
+    const flags = residualFlags(s, (pred, t) => {
+      if (pred === V.RDFS_DOMAIN && domainResolved && !claimedDomain && t.value === (domain as { value: string }).value) {
+        claimedDomain = true; return true;
+      }
+      if (pred === V.RDFS_RANGE && rangeResolved && !claimedRange && t.value === rangeUri) {
+        claimedRange = true; return true;
+      }
+      if (pred === V.RDFS_SUBPROPERTY_OF && !claimedSub && sub && t.value === sub.value) {
+        claimedSub = true; return true;
+      }
+      if (pred === V.OWL_INVERSE_OF && t.kind === 'iri' && propDefUris[t.value]) return true;
+      return false;
+    });
+
     insProp.run([
       uri,
       label ? label.value : null,
-      domain && domain.kind === 'iri' && classId[domain.value] !== undefined ? classId[domain.value] : null,
-      rangeUri && classId[rangeUri] !== undefined ? classId[rangeUri] : null,
+      domainResolved ? classId[(domain as { value: string }).value] : null,
+      rangeResolved ? classId[rangeUri as string] : null,
       sub ? sub.value : null,
       isLabelProp,
       def ? def.value : null,
@@ -193,7 +250,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const insSynth = db.prepare('INSERT INTO properties (uri, label, is_label_property) VALUES (?, ?, 0)');
+  const insSynth = db.prepare('INSERT INTO properties (uri, label, is_label_property, synthesised) VALUES (?, ?, 0, 1)');
   for (const uri of synthesised) {
     insSynth.run([uri, V.localName(uri)]);
     propId[uri] = db.exec('SELECT last_insert_rowid()')[0].values[0][0] as number;
@@ -225,31 +282,50 @@ async function main(): Promise<void> {
   updInverse.free();
 
   // -- Label resources: URI -> {text, lang, flags} ---------------------------
-  interface ILabelRes { form: string; lang?: string; flags: { [k: string]: string }; }
+  // Flags keep EVERY term (not just the first) with kind/lang/datatype, minus
+  // the literalForm stored in the column and the implicit `a skosxl:Label`.
+  interface ILabelRes { form: string; lang?: string; flagsJson: string | null; }
   const labelRes: { [uri: string]: ILabelRes } = {};
+  const labelsWithoutForm: string[] = [];
   for (const uri of labelUris) {
     const s = parsed.subjects[uri];
     const form = (s.predicates[V.SKOSXL_LITERAL_FORM] || [])[0];
-    if (!form) continue;
-    const flags: { [k: string]: string } = {};
-    for (const pred of Object.keys(s.predicates)) {
-      if (pred === V.SKOSXL_LITERAL_FORM || pred === V.RDF_TYPE) continue;
-      const v = s.predicates[pred][0];
-      if (v) flags[pred] = v.value;
+    if (!form) {
+      // Typed as skosxl:Label but no literal form: cannot live in `labels`
+      // (literal_form NOT NULL) — preserve the whole block via passthrough.
+      labelsWithoutForm.push(uri);
+      continue;
     }
-    labelRes[uri] = { form: form.value, lang: form.lang, flags };
+    let claimedForm = false;
+    const flagsJson = residualFlags(s, (pred, t) => {
+      if (pred === V.SKOSXL_LITERAL_FORM && !claimedForm && t.value === form.value) {
+        claimedForm = true; return true;
+      }
+      if (pred === V.RDF_TYPE && t.value === V.SKOSXL_LABEL) return true;
+      return false;
+    });
+    labelRes[uri] = { form: form.value, lang: form.lang, flagsJson };
   }
 
   // -- Concepts --------------------------------------------------------------
   const conceptId: { [uri: string]: number } = {};
   const insConcept = db.prepare('INSERT INTO concepts (uri, guid, class_id, pref_label) VALUES (?, ?, ?, ?)');
+  // rdf:type triples beyond the one stored in class_id (221 in the model —
+  // multi-typed concepts). Queued for passthrough_triples so export keeps them.
+  const extraTypeTriples: [string, string][] = [];
   for (const uri of conceptUris) {
     const s = parsed.subjects[uri];
     const guid = (s.predicates[V.SEM_GUID] || [])[0];
     const types = typeOf(s);
     let cls: number | null = null;
+    let clsUri: string | undefined;
     for (const t of types) {
-      if (classId[t] !== undefined) { cls = classId[t]; break; }
+      if (classId[t] !== undefined) { cls = classId[t]; clsUri = t; break; }
+    }
+    let claimedType = false;
+    for (const t of types) {
+      if (!claimedType && t === clsUri) { claimedType = true; continue; }
+      extraTypeTriples.push([uri, t]);
     }
     const prefRef = (s.predicates[V.SKOSXL_PREF_LABEL] || [])[0];
     const pref = prefRef && labelRes[prefRef.value] ? labelRes[prefRef.value].form : null;
@@ -270,11 +346,27 @@ async function main(): Promise<void> {
     'INSERT INTO labels (uri, concept_id, label_property, literal_form, lang, flags_json) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const insAnn = db.prepare(
-    'INSERT INTO annotations (concept_id, predicate_uri, value, lang) VALUES (?, ?, ?, ?)'
+    'INSERT INTO annotations (concept_id, predicate_uri, value, lang, datatype) VALUES (?, ?, ?, ?, ?)'
   );
   const insPass = db.prepare(
     'INSERT INTO passthrough_triples (subject, predicate, object, object_kind, lang, datatype) VALUES (?, ?, ?, ?, ?, ?)'
   );
+
+  // Queued fidelity extras: concept rdf:types beyond class_id, and typed
+  // labels that had no literal form (their whole block).
+  for (const [subj, typeUri] of extraTypeTriples) {
+    insPass.run([subj, V.RDF_TYPE, typeUri, 'iri', null, null]);
+    bump('passthroughExtraConceptTypes');
+  }
+  for (const uri of labelsWithoutForm) {
+    const s = parsed.subjects[uri];
+    for (const pred of Object.keys(s.predicates)) {
+      for (const t of s.predicates[pred]) {
+        insPass.run([uri, pred, t.value, t.kind === 'iri' ? 'iri' : 'literal', t.lang || null, t.datatype || null]);
+        bump('passthroughLabelsWithoutForm');
+      }
+    }
+  }
 
   /** Store a relationship, collapsing declared inverse pairs to one row. */
   const seenLinks: { [key: string]: true } = {};
@@ -320,7 +412,7 @@ async function main(): Promise<void> {
 
       for (const t of terms) {
         if (t.kind === 'literal') {
-          insAnn.run([cId, pred, t.value, t.lang || null]);
+          insAnn.run([cId, pred, t.value, t.lang || null, t.datatype || null]);
           bump('annotations');
           continue;
         }
@@ -328,10 +420,7 @@ async function main(): Promise<void> {
         // IRI object: a label resource, another concept, or something unmodelled.
         const lr = labelRes[t.value];
         if (lr) {
-          insLabel.run([
-            t.value, cId, pred, lr.form, lr.lang || null,
-            Object.keys(lr.flags).length ? JSON.stringify(lr.flags) : null
-          ]);
+          insLabel.run([t.value, cId, pred, lr.form, lr.lang || null, lr.flagsJson]);
           bump('labels');
           continue;
         }
@@ -379,7 +468,7 @@ async function main(): Promise<void> {
   insMeta.run(['source_file', path.basename(ttlPath)]);
   insMeta.run(['source_bytes', String(fs.statSync(ttlPath).size)]);
   insMeta.run(['imported_at', new Date().toISOString()]);
-  insMeta.run(['importer_version', '1']);
+  insMeta.run(['importer_version', '2']);
   insMeta.run(['stats_json', JSON.stringify(stats)]);
   insMeta.free();
 

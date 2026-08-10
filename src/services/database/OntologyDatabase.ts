@@ -13,7 +13,8 @@
 import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import {
   IConcept, IConceptDetail, IConceptLink, IAllowedProperty,
-  ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats
+  ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats,
+  FlagMap
 } from '../../models/IOntology';
 
 /** Nullable column -> undefined, so callers never see null. */
@@ -24,8 +25,12 @@ function num(v: SqlValue): number | undefined {
   return v === null || v === undefined ? undefined : Number(v);
 }
 
-/** flags_json holds every Semaphore predicate not promoted to a column. */
-function parseFlags(v: SqlValue): { [k: string]: string | string[] } | undefined {
+/**
+ * flags_json holds every Semaphore predicate not promoted to a column, as
+ * term-preserving `{ predicateUri: [{v, t:'i'|'l', lang?, dt?}] }` (see
+ * tools/schema.sql) so the Turtle exporter can replay it verbatim.
+ */
+function parseFlags(v: SqlValue): FlagMap | undefined {
   if (v === null || v === undefined) return undefined;
   try {
     return JSON.parse(String(v));
@@ -182,14 +187,15 @@ export class OntologyDatabase {
 
   public getAnnotations(conceptId: number): IAnnotation[] {
     return this._rows(
-      `SELECT id, predicate_uri, value, lang FROM annotations
+      `SELECT id, predicate_uri, value, lang, datatype FROM annotations
        WHERE concept_id = ? ORDER BY predicate_uri`,
       [conceptId]
     ).map(r => ({
       id: Number(r[0]),
       predicateUri: String(r[1]),
       value: str(r[2]),
-      lang: str(r[3])
+      lang: str(r[3]),
+      datatype: str(r[4])
     }));
   }
 
@@ -260,8 +266,8 @@ export class OntologyDatabase {
     if (!cls.flags) return undefined;
     for (const key of Object.keys(cls.flags)) {
       if (key.indexOf('#color') !== -1) {
-        const v = cls.flags[key];
-        return `#${Array.isArray(v) ? v[0] : v}`;
+        const terms = cls.flags[key];
+        if (terms && terms.length) return `#${terms[0].v}`;
       }
     }
     return undefined;
