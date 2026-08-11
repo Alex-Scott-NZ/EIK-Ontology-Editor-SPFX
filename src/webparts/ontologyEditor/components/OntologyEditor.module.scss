@@ -302,10 +302,24 @@
   font-size: 13px;
 }
 
-.detailCount {
-  font-size: 11px;
-  color: "[theme:neutralSecondary, default:#605e5c]";
-  margin-left: 2px;
+/* Count pill in section headers — same chip geometry as the row chips. */
+.countChip {
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  background: "[theme:themeLighter, default:#deecf9]";
+  color: "[theme:themeDarker, default:#004578]";
+}
+
+/* Keeps a concept and its describing chips on one line: the group wraps as a
+   unit instead of stranding an "inverse" chip on a line of its own. */
+.linkTarget {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .classChip {
@@ -333,10 +347,12 @@
 .labelRow,
 .linkRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
-  padding: 3px 0;
+  padding: 2px 0;
   flex-wrap: wrap;
+  min-height: 26px; /* reserve the hover-action height so rows don't jiggle */
+  position: relative; /* anchors the hover-action overlay */
 }
 
 .labelRole,
@@ -347,7 +363,6 @@
 
 .linkProperty {
   flex: 0 0 auto;
-  min-width: 150px;
 }
 
 .labelArrow {
@@ -355,13 +370,17 @@
   color: "[theme:neutralTertiary, default:#a19f9d]";
 }
 
+/* One chip geometry everywhere; only the colour varies, and the colour means
+   something: pale class colour = class, outline = language, grey = structural
+   note, blue = matching settings. */
 .langChip {
   display: inline-block;
   margin-left: 4px;
-  padding: 0 6px;
-  border-radius: 8px;
+  padding: 1px 7px;
+  border-radius: 9px;
   border: 1px solid "[theme:neutralLight, default:#edebe9]";
   font-size: 10px;
+  line-height: 14px;
   color: "[theme:neutralSecondary, default:#605e5c]";
 }
 
@@ -401,6 +420,10 @@
 .metadataName {
   font-weight: 600;
   font-size: 13px;
+  position: relative; /* anchors the hover-action overlay */
+  min-height: 26px;
+  display: flex;
+  align-items: center;
 }
 
 .metadataValue {
@@ -417,17 +440,19 @@
 }
 
 .inverseBadge {
-  padding: 0 6px;
-  border-radius: 8px;
+  padding: 1px 7px;
+  border-radius: 9px;
   font-size: 10px;
+  line-height: 14px;
   background: "[theme:neutralLighter, default:#f3f2f1]";
   color: "[theme:neutralSecondary, default:#605e5c]";
 }
 
 .flagBadge {
-  padding: 0 6px;
-  border-radius: 8px;
+  padding: 1px 7px;
+  border-radius: 9px;
   font-size: 10px;
+  line-height: 14px;
   background: "[theme:themeLighter, default:#deecf9]";
   color: "[theme:themeDarker, default:#004578]";
 }
@@ -442,7 +467,23 @@
   margin-left: auto;
   padding-left: 6px;
   opacity: 0;
+  pointer-events: none; /* invisible buttons must not swallow clicks */
   transition: opacity 0.1s ease-in;
+}
+
+/* In the detail pane the actions overlay the row's right edge instead of
+   taking layout space — otherwise the hidden buttons wrap to an invisible
+   second line on long rows, which read as random extra spacing. (Tree rows
+   keep the in-flow version: they never wrap, and the label truncates.) */
+.labelRow .rowActions,
+.linkRow .rowActions,
+.metadataName .rowActions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+  background: "[theme:white, default:#ffffff]";
 }
 
 .treeRow:hover .rowActions,
@@ -456,58 +497,47 @@
 .detailTitle:hover .rowActions,
 .detailTitle:focus-within .rowActions {
   opacity: 1;
+  pointer-events: auto;
 }
 
+/* Ghost icon buttons, matching the Fluent IconButtons used on the Model tab.
+   Colour identifies the verb (edit neutral, delete red, add green); the fill
+   only appears on hover so rows stay quiet until you reach for them. */
 .rowActionAdd,
 .rowActionDelete,
 .rowActionEdit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: 0;
   border-radius: 2px;
+  background: transparent;
   cursor: pointer;
-  font-size: 11px;
-  color: "[theme:white, default:#ffffff]";
+  font-size: 12px;
+
+  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
 }
 
 .rowActionAdd {
-  background: "[theme:green, default:#107c10]";
-  &:hover { background: #0b5a0b; }
+  color: "[theme:green, default:#107c10]";
+  &:hover { color: #0b5a0b; }
 }
 
 .rowActionDelete {
-  background: "[theme:redDark, default:#a4262c]";
-  &:hover { background: #7a1c21; }
+  color: "[theme:redDark, default:#a4262c]";
+  &:hover { color: #7a1c21; }
 }
 
 .rowActionEdit {
-  background: "[theme:neutralTertiary, default:#a19f9d]";
-  &:hover { background: "[theme:neutralSecondary, default:#605e5c]"; }
+  color: "[theme:neutralSecondary, default:#605e5c]";
+  &:hover { color: "[theme:themePrimary, default:#0078d4]"; }
 }
 
 .detailTitle .rowActionEdit {
   vertical-align: middle;
   margin-left: 10px;
-}
-
-.sectionAddButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  padding: 4px 10px;
-  border: 1px solid "[theme:neutralLight, default:#edebe9]";
-  border-radius: 2px;
-  background: "[theme:white, default:#ffffff]";
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-
-  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
 }
 
 /* -------------------------------------------------------------- picker -- */

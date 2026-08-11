@@ -12,6 +12,7 @@ export interface IConceptEditHandlers {
   onEditLabel: (label: ILabel) => void;
   onDeleteLabel: (label: ILabel) => void;
   onAddRelationship: () => void;
+  onEditRelationship: (relationshipId: number) => void;
   onDeleteRelationship: (relationshipId: number, description: string) => void;
   onAddBroader: () => void;
   onRemoveBroader: (parentId: number, parentLabel: string) => void;
@@ -75,13 +76,20 @@ const Section: React.FC<{
     <h3 className={styles.detailSectionHeading}>
       <Icon iconName={icon} className={styles.detailSectionIcon} />
       {title}
-      {count !== undefined && <sup className={styles.detailCount}>{count}</sup>}
+      {count !== undefined && <span className={styles.countChip}>{count}</span>}
+      {/* The verb lives in the tooltip; the header line stays quiet. */}
+      {onAdd && (
+        <button
+          type="button"
+          className={styles.rowActionAdd}
+          title={addLabel || 'Add'}
+          aria-label={addLabel || 'Add'}
+          onClick={onAdd}
+        >
+          <Icon iconName="Add" />
+        </button>
+      )}
     </h3>
-    {onAdd && (
-      <button type="button" className={styles.sectionAddButton} onClick={onAdd}>
-        <Icon iconName="Add" /> {addLabel || 'Add'}
-      </button>
-    )}
     {children}
   </section>
 );
@@ -188,7 +196,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
             )}
           </Section>
 
-          <Section icon="CircleAddition" title="Preferred Labels">
+          <Section icon="FavoriteStar" title="Preferred Labels">
             {prefLabels.length === 0 && <span className={styles.muted}>None</span>}
             {prefLabels.map(l => (
               <div key={l.id} className={styles.labelRow}>
@@ -199,7 +207,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
           </Section>
 
           <Section
-            icon="RedEye" title="Alternative Labels" count={altLabels.length}
+            icon="Dictionary" title="Alternative Labels" count={altLabels.length}
             addLabel="Create an alternative label"
             onAdd={edit ? edit.onAddLabel : undefined}
           >
@@ -208,7 +216,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
           </Section>
 
           <Section
-            icon="CircleAddition" title="Metadata" count={detail.annotations.length}
+            icon="PageList" title="Metadata" count={detail.annotations.length}
             addLabel="Add metadata field"
             onAdd={edit ? edit.onAddAnnotation : undefined}
           >
@@ -245,27 +253,33 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
               <div key={`${l.relationshipId}-${l.direction}-${i}`} className={styles.linkRow}>
                 <span className={styles.linkProperty}>{l.propertyLabel}</span>
                 <Icon iconName="ChevronRight" className={styles.labelArrow} />
-                <button
-                  type="button"
-                  className={styles.conceptLink}
-                  onClick={() => onNavigate(l.otherConceptId)}
-                >
-                  {l.otherConceptLabel}
-                </button>
-                {l.otherConceptClass && (
-                  <span
-                    className={styles.inlineClassChip}
-                    style={{ backgroundColor: colourForClassName(l.otherConceptClass, classLabels, classColours) }}
+                <span className={styles.linkTarget}>
+                  <button
+                    type="button"
+                    className={styles.conceptLink}
+                    onClick={() => onNavigate(l.otherConceptId)}
                   >
-                    {l.otherConceptClass}
-                  </span>
-                )}
-                {l.direction === 'inverse' && <span className={styles.inverseBadge}>inverse</span>}
+                    {l.otherConceptLabel}
+                  </button>
+                  {l.otherConceptClass && (
+                    <span
+                      className={styles.inlineClassChip}
+                      style={{ backgroundColor: colourForClassName(l.otherConceptClass, classLabels, classColours) }}
+                    >
+                      {l.otherConceptClass}
+                    </span>
+                  )}
+                  {l.direction === 'inverse' && <span className={styles.inverseBadge}>inverse</span>}
+                </span>
                 {edit && (
                   <span className={styles.rowActions}>
-                    {/* Deleting works from either end: the view carries the id
-                        of the single stored row, so there is no half-deleted
-                        state to get into. */}
+                    {/* Editing and deleting work from either end: the view
+                        carries the id of the single stored row, so there is
+                        no half-deleted state to get into. */}
+                    <RowAction
+                      icon="Edit" title="Change this relationship"
+                      onClick={() => edit.onEditRelationship(l.relationshipId)}
+                    />
                     <RowAction
                       icon="Delete" title="Remove this relationship" danger
                       onClick={() => edit.onDeleteRelationship(
@@ -326,7 +340,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
             ))}
           </Section>
 
-          <Section icon="Info" title="Identity">
+          <Section icon="Fingerprint" title="Identity">
             <div className={styles.metadataField}>
               <div className={styles.metadataName}>URI</div>
               <div className={styles.uriValue}>{detail.uri}</div>

@@ -38,9 +38,10 @@ type DialogState =
   | { kind: 'changeClass' }
   | { kind: 'addLabel' }
   | { kind: 'editLabel'; label: ILabel }
-  | { kind: 'pickRelationshipProperty' }
-  | { kind: 'newProperty' }
-  | { kind: 'pickRelationshipTarget'; propertyId: number; propertyLabel: string }
+  | { kind: 'pickRelationshipProperty'; replace?: { relationshipId: number } }
+  | { kind: 'newProperty'; replace?: { relationshipId: number } }
+  | { kind: 'pickRelationshipTarget'; propertyId: number; propertyLabel: string;
+      replace?: { relationshipId: number } }
   | { kind: 'pickBroader' }
   | { kind: 'addAnnotation' }
   | { kind: 'editAnnotation'; annotation: IAnnotation }
@@ -296,6 +297,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         act: () => { if (mutate(() => writer.deleteLabel(label.id))) closeDialog(); }
       }),
       onAddRelationship: () => setDialog({ kind: 'pickRelationshipProperty' }),
+      onEditRelationship: (relationshipId) =>
+        setDialog({ kind: 'pickRelationshipProperty', replace: { relationshipId } }),
       onDeleteRelationship: (relationshipId, description) => setDialog({
         kind: 'confirm',
         title: 'Remove relationship',
@@ -608,8 +611,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             properties={allowed}
             onCancel={closeDialog}
             onPick={(propertyId, propertyLabel) =>
-              setDialog({ kind: 'pickRelationshipTarget', propertyId, propertyLabel })}
-            onDefineNew={() => setDialog({ kind: 'newProperty' })}
+              setDialog({ kind: 'pickRelationshipTarget', propertyId, propertyLabel, replace: dialog.replace })}
+            onDefineNew={() => setDialog({ kind: 'newProperty', replace: dialog.replace })}
           />
         );
       }
@@ -631,7 +634,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
                 setDialog({
                   kind: 'pickRelationshipTarget',
                   propertyId: created.propertyId,
-                  propertyLabel: opts.label
+                  propertyLabel: opts.label,
+                  replace: dialog.replace
                 });
               }
             }}
@@ -648,8 +652,10 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             excludeConceptId={selectedId}
             onCancel={closeDialog}
             onPick={(targetId) => {
-              const ok = mutate(() =>
-                writer.addRelationship(selectedId as number, dialog.propertyId, targetId));
+              const replace = dialog.replace;
+              const ok = mutate(() => replace
+                ? writer.replaceRelationship(replace.relationshipId, selectedId as number, dialog.propertyId, targetId)
+                : writer.addRelationship(selectedId as number, dialog.propertyId, targetId));
               if (ok) closeDialog();
             }}
           />

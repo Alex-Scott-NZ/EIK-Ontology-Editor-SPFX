@@ -419,6 +419,26 @@ export class OntologyWriter {
   }
 
   /**
+   * Change an existing relationship's predicate and/or target from the point
+   * of view of `sourceConceptId` (the concept whose pane the user edited).
+   *
+   * Validated before anything is removed, so a rejected edit leaves the old
+   * relationship untouched. Journalled as delete + insert, which is what it is.
+   */
+  public replaceRelationship(
+    relationshipId: number,
+    sourceConceptId: number,
+    propertyId: number,
+    targetConceptId: number
+  ): void {
+    const errors = this.checkRelationshipAllowed(sourceConceptId, propertyId, targetConceptId);
+    if (errors.length) throw new ValidationFailure(errors);
+    this.deleteRelationship(relationshipId);
+    // Cannot fail: validation passed and the insert is OR IGNORE.
+    this.addRelationship(sourceConceptId, propertyId, targetConceptId);
+  }
+
+  /**
    * Delete a relationship by its stored row id. The UI may be showing the
    * derived inverse, but `v_concept_links` carries the underlying
    * relationship_id either way, so one call handles both ends.

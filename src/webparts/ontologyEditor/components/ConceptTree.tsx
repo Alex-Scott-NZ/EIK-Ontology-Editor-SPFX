@@ -99,7 +99,7 @@ const TreeRow: React.FC<IRowProps> = (props) => {
                 aria-label={`Delete ${node.prefLabel}`}
                 onClick={e => { e.stopPropagation(); onDelete(node); }}
               >
-                <Icon iconName="Cancel" />
+                <Icon iconName="Delete" />
               </button>
             )}
           </span>
