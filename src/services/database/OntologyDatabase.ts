@@ -592,7 +592,15 @@ export class OntologyDatabase {
     return {
       concepts: one('SELECT COUNT(*) FROM concepts'),
       classes: one('SELECT COUNT(*) FROM classes'),
-      properties: one('SELECT COUNT(*) FROM properties'),
+      // Pairs counted once, matching the Model tab — not raw rows, which
+      // would double every inverse pair and drag in label types and
+      // metadata fields.
+      properties: one(
+        `SELECT COUNT(*) FROM properties p
+         WHERE p.is_label_property = 0
+           AND (p.flags_json IS NULL OR p.flags_json NOT LIKE '%DatatypeProperty%')
+           AND (p.inverse_property_id IS NULL OR p.id <= p.inverse_property_id)`
+      ),
       relationships: one('SELECT COUNT(*) FROM relationships'),
       broaderEdges: one('SELECT COUNT(*) FROM broader'),
       labels: one('SELECT COUNT(*) FROM labels')

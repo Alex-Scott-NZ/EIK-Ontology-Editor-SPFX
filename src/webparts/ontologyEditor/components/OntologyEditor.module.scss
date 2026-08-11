@@ -568,6 +568,9 @@
 .flagChoices {
   :global(.ms-ChoiceFieldGroup-flexContainer) {
     display: flex;
+    // Five options (Influence in rulebase) must fold rather than clip off
+    // the dialog edge.
+    flex-wrap: wrap;
     gap: 12px;
   }
 }

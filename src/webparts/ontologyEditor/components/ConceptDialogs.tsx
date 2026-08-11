@@ -319,7 +319,7 @@ export const LabelDialog: React.FC<ILabelDialogProps> = (props) => {
         title: label ? `Edit label — "${label.literalForm}"` : 'Add a label'
       }}
       modalProps={{ isBlocking: true }}
-      minWidth={560}
+      minWidth={680}
     >
       {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
 
