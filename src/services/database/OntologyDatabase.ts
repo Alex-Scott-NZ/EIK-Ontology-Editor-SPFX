@@ -10,7 +10,8 @@
  * would break undo and the change-set export.
  */
 
-import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js';
+import { Database, SqlJsStatic, SqlValue } from 'sql.js';
+import { getSqlJs } from './sqlJsLoader';
 import {
   IConcept, IConceptDetail, IConceptLink, IAllowedProperty,
   ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats,
@@ -53,16 +54,9 @@ export class OntologyDatabase {
     db.run('PRAGMA foreign_keys = ON');
   }
 
-  /**
-   * @param bytes  the .sqlite file contents
-   * @param wasmLocateFile  maps 'sql-wasm.wasm' to a URL inside the bundle.
-   *   Must resolve to a bundled asset — SharePoint's CSP blocks CDN fetches.
-   */
-  public static async load(
-    bytes: ArrayBuffer,
-    wasmLocateFile: (file: string) => string
-  ): Promise<OntologyDatabase> {
-    const SQL: SqlJsStatic = await initSqlJs({ locateFile: wasmLocateFile });
+  /** @param bytes  the .sqlite file contents */
+  public static async load(bytes: ArrayBuffer): Promise<OntologyDatabase> {
+    const SQL: SqlJsStatic = await getSqlJs();
     return new OntologyDatabase(new SQL.Database(new Uint8Array(bytes)));
   }
 

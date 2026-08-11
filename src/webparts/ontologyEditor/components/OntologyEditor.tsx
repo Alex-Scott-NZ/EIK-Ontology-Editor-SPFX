@@ -3,10 +3,7 @@ import {
   SearchBox, Spinner, SpinnerSize, MessageBar, MessageBarType,
   CommandBar, ICommandBarItemProps, Pivot, PivotItem
 } from '@fluentui/react';
-import initSqlJs, { SqlJsStatic } from 'sql.js';
-// Resolved by the asset-module rule in gulpfile.js to the deployed URL, so the
-// binary ships with the package rather than needing a manual upload.
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm';
+import { SqlJsStatic } from 'sql.js';
 
 import styles from './OntologyEditor.module.scss';
 import { IOntologyEditorProps } from './IOntologyEditorProps';
@@ -16,6 +13,7 @@ import ConceptList from './ConceptList';
 import ConceptDetailPane from './ConceptDetail';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
+import { getSqlJs } from '../../../services/database/sqlJsLoader';
 import { OntologyWriter, ValidationFailure, ILabelFlagEdit } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
 import {
@@ -95,15 +93,6 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     () => (context ? new FileService(context) : undefined), [context]
   );
 
-  /**
-   * sql.js fetches its .wasm at runtime. The URL comes from the bundled asset,
-   * so it always points at the deployed copy — no upload step, and it survives
-   * the site moving.
-   */
-  const locateWasm = React.useCallback((file: string): string => {
-    return /\.wasm$/.test(file) ? sqlWasmUrl : file;
-  }, []);
-
   const adopt = React.useCallback((database: OntologyDatabase, label: string): void => {
     setDb(database);
     setWriter(new OntologyWriter(
@@ -145,15 +134,15 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
   const openSqlite = React.useCallback(async (bytes: ArrayBuffer, label: string): Promise<void> => {
     setProgress('Opening database…');
-    const database = await OntologyDatabase.load(bytes, locateWasm);
+    const database = await OntologyDatabase.load(bytes);
     adopt(database, label);
-  }, [locateWasm, adopt]);
+  }, [adopt]);
 
   const runImport = React.useCallback(async (ttl: string, label: string, bytes: number): Promise<void> => {
     setProgress(PHASE_TEXT.parsing);
     await yieldToBrowser();
 
-    const SQL: SqlJsStatic = await initSqlJs({ locateFile: locateWasm });
+    const SQL: SqlJsStatic = await getSqlJs();
 
     // The import is synchronous and CPU-bound; onProgress paints the phase name
     // but cannot interrupt a phase. The tab will be unresponsive during the
@@ -171,7 +160,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       );
     }
     adopt(OntologyDatabase.fromDatabase(result.database), label);
-  }, [locateWasm, adopt]);
+  }, [adopt]);
 
   const choose = React.useCallback(async (choice: ISourceChoice): Promise<void> => {
     setStage('working');

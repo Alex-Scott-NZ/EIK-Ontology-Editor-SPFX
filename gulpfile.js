@@ -11,19 +11,19 @@ build.addSuppression(
 build.tslintCmd.enabled = false;
 
 /**
- * Emit sql.js's WebAssembly binary as a deployed asset.
+ * Inline sql.js's WebAssembly binary into the bundle as a data URI.
  *
- * Without this the .wasm has to be uploaded to a library by hand and located by
- * absolute URL — easy to get wrong, and it breaks whenever the site moves. As
- * an asset module webpack copies it next to the bundle and hands us the CDN
- * URL at runtime, so it ships with the package and needs no setup.
+ * asset/resource (a URL fetched at runtime) worked under `gulp serve` but broke
+ * in the installed package: the URL is resolved from document.currentScript at
+ * bundle load, which SharePoint's module loader does not guarantee — the fetch
+ * fell back to a page-relative path and 404'd ("both async and sync fetching
+ * of the wasm failed"). Inlined bytes cannot mis-resolve anywhere.
  */
 build.configureWebpack.mergeConfig({
   additionalConfiguration: (generatedConfiguration) => {
     generatedConfiguration.module.rules.push({
       test: /\.wasm$/,
-      type: 'asset/resource',
-      generator: { filename: '[name][ext]' }
+      type: 'asset/inline'
     });
     return generatedConfiguration;
   }
