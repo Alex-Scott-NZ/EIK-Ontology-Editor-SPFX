@@ -13,6 +13,8 @@ export interface IConceptTreeProps {
   /** Editing affordances; omit for a read-only tree. */
   onAddChild?: (parent: ITreeNode) => void;
   onDelete?: (node: ITreeNode) => void;
+  /** Renders a ghost "+ New top concept" row at the end of the root level. */
+  onAddRoot?: () => void;
   /** Bump to force a refetch after an edit. */
   refreshToken?: number;
 }
@@ -128,7 +130,7 @@ const TreeRow: React.FC<IRowProps> = (props) => {
  * Classification, …) — the model's upper ontology.
  */
 const ConceptTree: React.FC<IConceptTreeProps> = (props) => {
-  const { db, selectedId, onSelect, revealPath, onAddChild, onDelete, refreshToken } = props;
+  const { db, selectedId, onSelect, revealPath, onAddChild, onDelete, onAddRoot, refreshToken } = props;
   const roots = React.useMemo(() => db.getRootNodes(), [db, refreshToken]);
   const [expanded, setExpanded] = React.useState<{ [id: number]: true }>({});
 
@@ -167,6 +169,12 @@ const ConceptTree: React.FC<IConceptTreeProps> = (props) => {
           refreshToken={refreshToken}
         />
       ))}
+      {onAddRoot && (
+        <button type="button" className={styles.ghostRow} onClick={onAddRoot}>
+          <Icon iconName="Add" />
+          <span>{roots.length ? 'New top concept' : 'Add the first concept'}</span>
+        </button>
+      )}
     </div>
   );
 };

@@ -592,3 +592,25 @@
     margin: 8px 0;
   }
 }
+
+.ghostRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 2px;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  background: none;
+  color: #605e5c;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: #c8c6c4;
+    background: #faf9f8;
+    color: #323130;
+  }
+}

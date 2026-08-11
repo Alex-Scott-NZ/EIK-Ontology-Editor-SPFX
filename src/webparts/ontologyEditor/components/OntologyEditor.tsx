@@ -426,6 +426,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
                   revealPath={revealPath}
                   onAddChild={onTreeAddChild}
                   onDelete={onTreeDelete}
+                  onAddRoot={() => setDialog({ kind: 'newConcept', parent: undefined })}
                   refreshToken={refreshToken}
                 />
               ) : (
