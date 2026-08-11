@@ -18,7 +18,8 @@ import { getSqlJs } from '../../../services/database/sqlJsLoader';
 import { OntologyWriter, ValidationFailure, ILabelFlagEdit } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
 import {
-  FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes
+  FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes,
+  defaultOntologyFolder
 } from '../../../services/sharepoint/FileService';
 import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../../models/IOntology';
 import { IConceptEditHandlers } from './ConceptDetail';
@@ -90,23 +91,37 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   // Views memoise their queries; bumping this refetches after a mutation.
   const [refreshToken, setRefreshToken] = React.useState<number>(0);
   const [pendingChanges, setPendingChanges] = React.useState<number>(0);
+  // Journal size at the last save — the journal is cumulative (it is the audit
+  // trail), so "unsaved" is the difference, not the total.
+  const [savedChanges, setSavedChanges] = React.useState<number>(0);
 
   const fileService = React.useMemo(
     () => (context ? new FileService(context) : undefined), [context]
   );
 
+  // The property-pane folder wins; otherwise the hard-coded site convention.
+  const effectiveFolder = React.useMemo(
+    () => (libraryFolder && libraryFolder.trim())
+      || (context ? defaultOntologyFolder(context) : ''),
+    [libraryFolder, context]
+  );
+
   const adopt = React.useCallback((database: OntologyDatabase, label: string): void => {
     setDb(database);
-    setWriter(new OntologyWriter(
+    const w = new OntologyWriter(
       database.raw,
       (context && context.pageContext.user && context.pageContext.user.email) || 'unknown'
-    ));
+    );
+    setWriter(w);
     setStats(database.getStats());
     setClassColours(database.getClassColourMap());
     setClassLabels(database.getClassLabelMap());
     setSourceLabel(label);
     setSelectedId(undefined);
-    setPendingChanges(0);
+    // A reopened database carries its journal (the audit trail); everything in
+    // it was saved by definition, so the unsaved baseline starts there.
+    setPendingChanges(w.getChangeCount());
+    setSavedChanges(w.getChangeCount());
     setRefreshToken(t => t + 1);
     setStage('ready');
   }, [context]);
@@ -218,20 +233,23 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const saveLocally = React.useCallback((): void => {
     if (!db) return;
     downloadBytes(db.export(), 'ontology.sqlite');
-  }, [db]);
+    if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
+  }, [db, writer]);
 
   const saveToLibrary = React.useCallback(async (): Promise<void> => {
-    if (!db || !fileService || !libraryFolder) return;
+    if (!db || !fileService || !effectiveFolder) return;
     setProgress('Uploading to SharePoint…');
     setStage('working');
     try {
-      await fileService.writeFile(libraryFolder, 'ontology.sqlite', db.export());
+      await fileService.ensureFolder(effectiveFolder);
+      await fileService.writeFile(effectiveFolder, 'ontology.sqlite', db.export());
+      if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
       setStage('ready');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage('ready');
     }
-  }, [db, fileService, libraryFolder]);
+  }, [db, fileService, effectiveFolder, writer]);
 
   const onSearch = React.useCallback((term: string): void => {
     setSearch(term);
@@ -323,12 +341,15 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     },
     {
       key: 'download',
-      text: pendingChanges > 0 ? `Save .sqlite (${pendingChanges} change${pendingChanges === 1 ? '' : 's'})` : 'Save .sqlite',
+      text: (pendingChanges - savedChanges) > 0
+        ? `Save .sqlite (${pendingChanges - savedChanges} unsaved)`
+        : 'Save .sqlite',
       iconProps: { iconName: 'Download' },
       onClick: () => { saveLocally(); }
     },
-    ...(fileService && libraryFolder ? [{
-      key: 'upload', text: 'Save to library', iconProps: { iconName: 'CloudUpload' },
+    ...(fileService ? [{
+      key: 'upload', text: 'Save to SharePoint', iconProps: { iconName: 'CloudUpload' },
+      title: `Saves ontology.sqlite to ${effectiveFolder}`,
       onClick: () => { void saveToLibrary(); }
     }] : []),
     {
@@ -354,7 +375,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     return (
       <div className={styles.ontologyEditor}>
         <SourcePicker
-          libraryFolder={libraryFolder || ''}
+          libraryFolder={effectiveFolder}
           onBrowseLibrary={
             fileService
               ? (folder) => fileService.listFiles(folder, ['.ttl', '.sqlite'])

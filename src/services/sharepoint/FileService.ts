@@ -26,6 +26,17 @@ export interface ILibraryFile {
   modified: string;
 }
 
+/**
+ * The hard-coded home for ontology files on the current site:
+ * `<site>/Shared Documents/Ontology`. One well-known folder beats per-user
+ * paths — the default Documents library also versions every save, which is
+ * the safety net for a master file. The property-pane folder overrides this.
+ */
+export function defaultOntologyFolder(context: WebPartContext): string {
+  const web = context.pageContext.web.serverRelativeUrl;
+  return `${web === '/' ? '' : web}/Shared Documents/Ontology`;
+}
+
 export class FileService {
   private _context: WebPartContext;
 
@@ -89,6 +100,24 @@ export class FileService {
     if (!extensions || !extensions.length) return files;
     const lower = extensions.map(e => e.toLowerCase());
     return files.filter(f => lower.some(e => f.name.toLowerCase().lastIndexOf(e) === f.name.length - e.length));
+  }
+
+  /**
+   * Create a folder if it does not exist. AddUsingPath returns the existing
+   * folder rather than failing, so calling this before every write is safe.
+   * Only the LAST segment is created — the parent library must exist, which
+   * "Shared Documents" always does.
+   */
+  public async ensureFolder(serverRelativePath: string): Promise<void> {
+    const url =
+      `${this._webUrl}/_api/web/Folders/AddUsingPath(decodedurl='` +
+      `${encodePath(odataLiteral(serverRelativePath))}')`;
+    const response: SPHttpClientResponse = await this._context.spHttpClient.post(
+      url, SPHttpClient.configurations.v1, {}
+    );
+    if (!response.ok) {
+      throw new Error(`Could not create folder ${serverRelativePath} — HTTP ${response.status} ${response.statusText}`);
+    }
   }
 
   /**

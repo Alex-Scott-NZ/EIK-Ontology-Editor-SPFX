@@ -65,6 +65,20 @@ const SourcePicker: React.FC<ISourcePickerProps> = (props) => {
     }
   }, [folder, onBrowseLibrary]);
 
+  // List the default folder immediately — a returning user's first question is
+  // "where is the file I saved?". A folder that does not exist yet (nothing
+  // saved on this site) is normal, so that error stays quiet.
+  const autoBrowsed = React.useRef(false);
+  React.useEffect(() => {
+    if (autoBrowsed.current || !onBrowseLibrary || !folder.trim()) return;
+    autoBrowsed.current = true;
+    setBrowsing(true);
+    onBrowseLibrary(folder.trim())
+      .then(f => setFiles(f))
+      .catch(() => setFiles(undefined))
+      .finally(() => setBrowsing(false));
+  }, [onBrowseLibrary, folder]);
+
   const pickLocal = (input: HTMLInputElement | null, kind: SourceKind): void => {
     const file = input && input.files && input.files[0];
     if (file) onChoose({ kind, file });
