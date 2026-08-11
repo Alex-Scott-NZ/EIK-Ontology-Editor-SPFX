@@ -67,13 +67,22 @@ must exist before concepts can be linked.
    | Mentions | Is mentioned in | Document | Any concept |
    - *Expect:* 3 pair rows. The preview line in the dialog should read
      sensibly before you hit Create (that's the domain/range talking).
-4. **Concepts.** Tree tab → New concept:
-   - `ACME Ltd` — class **Organisation** (no parent → becomes a top concept)
-   - `Tax filing` — class **Activity**
-   - `Annual return` — class **Activity**, parent **Tax filing**
-   - `Filing guide` — class **Document**
-   - *Expect:* ACME and Tax filing at top level; Annual return nested under
-     Tax filing; class colours on the tree nodes.
+4. **Concepts.** Two different routes, depending on whether the concept has a
+   parent:
+   - **Top-level** — the **New concept** button in the command bar. Create:
+     - `ACME Ltd` — class **Organisation**
+     - `Tax filing` — class **Activity**
+     - `Filing guide` — class **Document**
+   - **As a child** — hover **Tax filing** in the tree and click the
+     **add-child (+) icon** that appears on the row. The dialog opens as
+     "New concept under \"Tax filing\"". Create:
+     - `Annual return` — the class dropdown comes pre-set to **Activity**
+       (children default to their parent's class; change the dropdown only
+       when the child is a different kind of thing).
+   - *Expect:* ACME, Tax filing and Filing guide at top level; Annual return
+     nested under Tax filing; class colours on the tree nodes.
+   - (A third route if you forgot the parent: create top-level, then select
+     the concept → **add broader** in the detail pane → pick the parent.)
 5. **Hierarchy, second parent (polyhierarchy).** Select Annual return → add
    broader → pick ACME Ltd (nonsense semantically, but it proves the
    mechanics).
