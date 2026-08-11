@@ -67,6 +67,21 @@ const check = (name: string, ok: boolean, detail?: string): void => {
   w.addLabel({ conceptId: acme, labelProperty: 'http://www.w3.org/2008/05/skos-xl#altLabel', literalForm: 'ACME', lang: 'en' });
   w.addAnnotation(acme, 'http://www.w3.org/2004/02/skos/core#definition', 'A test organisation.', 'en');
 
+  console.log('== metadata fields + label types (model-level definitions) ==');
+  const risk = w.createMetadataField({ label: 'Risk rating', domainClassId: activity, definition: 'How risky.' });
+  const acro = w.createLabelType({ label: 'Acronym' });
+  check('field + label type created', risk > 0 && acro > 0);
+  try { w.createMetadataField({ label: 'Performs' }); check('name clash with existing type rejected', false); }
+  catch (e) { check('name clash with existing type rejected', e instanceof ValidationFailure); }
+  const riskUri = String(db.exec('SELECT uri FROM properties WHERE id=' + risk)[0].values[0][0]);
+  const acroUri = String(db.exec('SELECT uri FROM properties WHERE id=' + acro)[0].values[0][0]);
+  w.addAnnotation(filing, riskUri, 'High', 'en');
+  w.addLabel({ conceptId: acme, labelProperty: acroUri, literalForm: 'ACM', lang: 'en' });
+  try { w.deleteMetadataField(risk); check('in-use field delete refused', false); }
+  catch (e) { check('in-use field delete refused', e instanceof ValidationFailure); }
+  try { w.deleteLabelType(acro); check('in-use label type delete refused', false); }
+  catch (e) { check('in-use label type delete refused', e instanceof ValidationFailure); }
+
   console.log('== type edit + guarded deletes ==');
   w.updatePropertyPair(pair.propertyId, { definition: 'The party actively carries out the activity.' });
   try { w.deletePropertyPair(pair.propertyId); check('in-use type delete refused', false); }
@@ -95,6 +110,8 @@ const check = (name: string, ok: boolean, detail?: string): void => {
   check('concept + broader exported', has('ACME') && has('broader'));
   check('relationship exported both directions', has('Performs') && has('Is-performed-by') || has('IsPerformedBy'));
   check('label + annotation exported', has('literalForm') && has('A test organisation.'));
+  check('metadata field exported as DatatypeProperty', has('DatatypeProperty') && has('Risk rating') && has('High'));
+  check('label type + its label exported', has('Acronym') && has('ACM'));
 
   console.log(failures ? `\n${failures} FAILURES` : '\nALL CHECKS PASSED');
   process.exit(failures ? 1 : 0);

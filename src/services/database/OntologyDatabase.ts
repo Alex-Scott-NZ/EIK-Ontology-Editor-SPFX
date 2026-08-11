@@ -421,7 +421,10 @@ export class OntologyDatabase {
     return this._rows(
       `SELECT id, uri, label, domain_class_id, range_class_id, inverse_property_id,
               sub_property_of, definition, comment, flags_json
-       FROM properties WHERE is_label_property = 0 ORDER BY label`
+       FROM properties
+       WHERE is_label_property = 0
+         AND (flags_json IS NULL OR flags_json NOT LIKE '%DatatypeProperty%')
+       ORDER BY label`
     ).map(r => ({
       id: Number(r[0]),
       uri: String(r[1]),
@@ -433,6 +436,79 @@ export class OntologyDatabase {
       definition: str(r[7]),
       comment: str(r[8]),
       flags: parseFlags(r[9])
+    }));
+  }
+
+  /**
+   * Metadata field definitions — datatype properties, e.g. Business
+   * definition, Last Reviewed Date. Semaphore calls these Resource Metadata;
+   * the concepts task shows them under "Metadata". Distinguished from
+   * relationship types by their rdf:type in flags_json (no dedicated column,
+   * so saved databases stay compatible).
+   */
+  public getMetadataFields(): Array<{
+    id: number; uri: string; label?: string; domainClassId?: number;
+    domainClassName?: string; definition?: string; uses: number;
+  }> {
+    return this._rows(
+      `SELECT p.id, p.uri, p.label, p.domain_class_id, dc.label,
+              COALESCE(p.definition, p.comment),
+              (SELECT COUNT(*) FROM annotations a WHERE a.predicate_uri = p.uri)
+       FROM properties p
+       LEFT JOIN classes dc ON dc.id = p.domain_class_id
+       WHERE p.flags_json LIKE '%DatatypeProperty%'
+       ORDER BY p.label`
+    ).map(r => ({
+      id: Number(r[0]),
+      uri: String(r[1]),
+      label: str(r[2]),
+      domainClassId: num(r[3]),
+      domainClassName: str(r[4]),
+      definition: str(r[5]),
+      uses: Number(r[6])
+    }));
+  }
+
+  /**
+   * Metadata fields usable on this concept: unrestricted fields always, plus
+   * fields whose domain is the concept's class or an ancestor of it.
+   */
+  public getMetadataFieldsFor(conceptId: number): Array<{ uri: string; label?: string }> {
+    return this._rows(
+      `SELECT p.uri, p.label
+       FROM properties p
+       WHERE p.flags_json LIKE '%DatatypeProperty%'
+         AND (p.domain_class_id IS NULL OR p.domain_class_id IN (
+           SELECT a.ancestor_id FROM v_class_ancestry a
+           JOIN concepts c ON c.class_id = a.class_id
+           WHERE c.id = ?
+         ))
+       ORDER BY p.label`,
+      [conceptId]
+    ).map(r => ({ uri: String(r[0]), label: str(r[1]) }));
+  }
+
+  /** Label type definitions (Acronym, Has code, …) with usage counts. */
+  public getLabelTypes(): Array<{
+    id: number; uri: string; label?: string; domainClassId?: number;
+    domainClassName?: string; definition?: string; uses: number;
+  }> {
+    return this._rows(
+      `SELECT p.id, p.uri, p.label, p.domain_class_id, dc.label,
+              COALESCE(p.definition, p.comment),
+              (SELECT COUNT(*) FROM labels l WHERE l.label_property = p.uri)
+       FROM properties p
+       LEFT JOIN classes dc ON dc.id = p.domain_class_id
+       WHERE p.is_label_property = 1
+       ORDER BY p.label`
+    ).map(r => ({
+      id: Number(r[0]),
+      uri: String(r[1]),
+      label: str(r[2]),
+      domainClassId: num(r[3]),
+      domainClassName: str(r[4]),
+      definition: str(r[5]),
+      uses: Number(r[6])
     }));
   }
 
@@ -469,6 +545,7 @@ export class OntologyDatabase {
        JOIN properties p ON p.id = ap.property_id
        LEFT JOIN classes rc ON rc.id = ap.range_class_id
        WHERE ap.concept_id = ?
+         AND (p.flags_json IS NULL OR p.flags_json NOT LIKE '%DatatypeProperty%')
        ORDER BY ap.label`,
       [conceptId]
     ).map(r => ({

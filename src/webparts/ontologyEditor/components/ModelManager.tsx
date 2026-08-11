@@ -28,12 +28,21 @@ export interface IModelManagerProps {
   refreshToken: number;
 }
 
+interface ISimpleDefinition {
+  id: number; uri: string; label?: string; domainClassId?: number;
+  domainClassName?: string; definition?: string; uses: number;
+}
+
 type ModelDialog =
   | { kind: 'none' }
   | { kind: 'newClass' }
   | { kind: 'editClass'; cls: IOntologyClass }
   | { kind: 'newProperty' }
-  | { kind: 'editProperty'; prop: IOntologyProperty };
+  | { kind: 'editProperty'; prop: IOntologyProperty }
+  | { kind: 'newField' }
+  | { kind: 'editField'; def: ISimpleDefinition }
+  | { kind: 'newLabelType' }
+  | { kind: 'editLabelType'; def: ISimpleDefinition };
 
 const ClassDialog: React.FC<{
   title: string;
@@ -115,6 +124,68 @@ const ClassDialog: React.FC<{
   );
 };
 
+/** Name + optional domain + definition — metadata fields and label types. */
+const SimpleDefinitionDialog: React.FC<{
+  title: string;
+  domainHint: string;
+  initial?: { label: string; definition?: string };
+  classes: IOntologyClass[];
+  /** Domain is set at creation only, like relationship types. */
+  showDomain: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSave: (v: { label: string; domainClassId?: number; definition?: string }) => void;
+}> = ({ title, domainHint, initial, classes, showDomain, error, onCancel, onSave }) => {
+  const [label, setLabel] = React.useState(initial ? initial.label : '');
+  const [definition, setDefinition] = React.useState((initial && initial.definition) || '');
+  const [domainClassId, setDomainClassId] = React.useState<number | undefined>(undefined);
+
+  const domainOptions: IDropdownOption[] = [
+    { key: -1, text: 'Any concept' },
+    ...classes.filter(c => !!c.label).map(c => ({ key: c.id, text: c.label as string }))
+  ];
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={onCancel}
+      dialogContentProps={{ type: DialogType.normal, title }}
+      modalProps={{ isBlocking: true }}
+      minWidth={480}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+      <TextField
+        label="Name" required autoFocus
+        value={label} onChange={(_, v) => setLabel(v || '')}
+      />
+      {showDomain && (
+        <Dropdown
+          label="Applies to (domain)"
+          selectedKey={domainClassId === undefined ? -1 : domainClassId}
+          options={domainOptions}
+          onChange={(_, o) => setDomainClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+        />
+      )}
+      {showDomain && <p style={{ fontSize: 12, margin: '4px 0 0' }}>{domainHint}</p>}
+      <TextField
+        label="Definition" multiline rows={3}
+        description="What this means and when to use it."
+        value={definition} onChange={(_, v) => setDefinition(v || '')}
+      />
+      <DialogFooter>
+        <PrimaryButton
+          text="Save" disabled={!label.trim()}
+          onClick={() => onSave({
+            label: label.trim(), domainClassId,
+            definition: definition.trim() || undefined
+          })}
+        />
+        <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
 const EditPropertyDialog: React.FC<{
   prop: IOntologyProperty;
   inverseLabel?: string;
@@ -171,6 +242,8 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
   const properties = React.useMemo(() => db.getProperties(), [db, refreshToken]);
   const usage = React.useMemo(() => db.getPropertyUsage(), [db, refreshToken]);
   const conceptCounts = React.useMemo(() => db.getClassConceptCounts(), [db, refreshToken]);
+  const metadataFields = React.useMemo(() => db.getMetadataFields(), [db, refreshToken]);
+  const labelTypes = React.useMemo(() => db.getLabelTypes(), [db, refreshToken]);
 
   const classById = React.useMemo(() => {
     const m: { [id: number]: IOntologyClass } = {};
@@ -302,6 +375,95 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
         )}
       </section>
 
+      <section>
+        <div className={styles.modelSectionHeader}>
+          <h3>Metadata fields ({metadataFields.length})</h3>
+          <DefaultButton
+            text="New metadata field" iconProps={{ iconName: 'Add' }}
+            onClick={() => setDialog({ kind: 'newField' })}
+          />
+        </div>
+        <p className={styles.muted}>
+          The note fields concepts may carry (Semaphore&apos;s Resource Metadata) —
+          defined once here so every value uses the same field, never invented
+          by typo on a concept. The standard SKOS notes (definition, scope
+          note, …) are always available without being defined.
+        </p>
+        {metadataFields.length === 0 ? (
+          <MessageBar>No custom metadata fields. Concepts still get the standard SKOS notes.</MessageBar>
+        ) : (
+          <table className={styles.fileTable}>
+            <thead>
+              <tr><th>Name</th><th>Applies to</th><th>Uses</th><th>Definition</th><th /></tr>
+            </thead>
+            <tbody>
+              {metadataFields.map(f => (
+                <tr key={f.id}>
+                  <td>{f.label || '(system)'}</td>
+                  <td>{f.domainClassName || 'Any'}</td>
+                  <td>{f.uses}</td>
+                  <td className={styles.muted}>{(f.definition || '').slice(0, 60)}</td>
+                  <td>
+                    <IconButton
+                      iconProps={{ iconName: 'Edit' }} title="Edit"
+                      onClick={() => setDialog({ kind: 'editField', def: f })}
+                    />
+                    <IconButton
+                      iconProps={{ iconName: 'Delete' }} title="Delete"
+                      onClick={() => { if (mutate(() => writer.deleteMetadataField(f.id))) close(); }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section>
+        <div className={styles.modelSectionHeader}>
+          <h3>Label types ({labelTypes.length})</h3>
+          <DefaultButton
+            text="New label type" iconProps={{ iconName: 'Add' }}
+            onClick={() => setDialog({ kind: 'newLabelType' })}
+          />
+        </div>
+        <p className={styles.muted}>
+          The roles a label can play beyond preferred/alternative — Acronym,
+          Has code, Has evidence and so on. Defined here, then offered in the
+          label dialog on every concept.
+        </p>
+        {labelTypes.length === 0 ? (
+          <MessageBar>No label types. Labels can still be added as &quot;Alternative label&quot;.</MessageBar>
+        ) : (
+          <table className={styles.fileTable}>
+            <thead>
+              <tr><th>Name</th><th>Applies to</th><th>Uses</th><th>Definition</th><th /></tr>
+            </thead>
+            <tbody>
+              {labelTypes.map(t => (
+                <tr key={t.id}>
+                  <td>{t.label || '(unnamed)'}</td>
+                  <td>{t.domainClassName || 'Any'}</td>
+                  <td>{t.uses}</td>
+                  <td className={styles.muted}>{(t.definition || '').slice(0, 60)}</td>
+                  <td>
+                    <IconButton
+                      iconProps={{ iconName: 'Edit' }} title="Edit"
+                      onClick={() => setDialog({ kind: 'editLabelType', def: t })}
+                    />
+                    <IconButton
+                      iconProps={{ iconName: 'Delete' }} title="Delete"
+                      onClick={() => { if (mutate(() => writer.deleteLabelType(t.id))) close(); }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       {dialog.kind === 'newClass' && (
         <ClassDialog
           title="New class" classes={classes} showParent error={mutateError}
@@ -335,6 +497,40 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
           error={mutateError}
           onCancel={close}
           onCreate={options => { if (mutate(() => writer.createPropertyPair(options))) close(); }}
+        />
+      )}
+      {(dialog.kind === 'newField' || dialog.kind === 'newLabelType') && (
+        <SimpleDefinitionDialog
+          title={dialog.kind === 'newField' ? 'New metadata field' : 'New label type'}
+          domainHint={dialog.kind === 'newField'
+            ? 'Restrict which concepts may carry this field, e.g. RDS note only on RDS.'
+            : 'Restrict which concepts may carry this label role, e.g. Has shoulder code only on Information.'}
+          classes={classes}
+          showDomain
+          error={mutateError}
+          onCancel={close}
+          onSave={v => {
+            const create = dialog.kind === 'newField'
+              ? () => writer.createMetadataField(v)
+              : () => writer.createLabelType(v);
+            if (mutate(create)) close();
+          }}
+        />
+      )}
+      {(dialog.kind === 'editField' || dialog.kind === 'editLabelType') && (
+        <SimpleDefinitionDialog
+          title={dialog.kind === 'editField' ? 'Edit metadata field' : 'Edit label type'}
+          domainHint=""
+          classes={classes}
+          showDomain={false}
+          initial={{ label: dialog.def.label || '', definition: dialog.def.definition }}
+          error={mutateError}
+          onCancel={close}
+          onSave={v => {
+            if (mutate(() => writer.updateSimpleProperty(dialog.def.id, {
+              label: v.label, definition: v.definition
+            }))) close();
+          }}
         />
       )}
       {dialog.kind === 'editProperty' && (

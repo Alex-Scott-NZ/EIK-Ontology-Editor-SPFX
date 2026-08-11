@@ -800,6 +800,112 @@ export class OntologyWriter {
     }
   }
 
+  // -- metadata FIELD and label TYPE definitions (schema-level) --------------
+
+  /**
+   * Shared insert for the two "simple" property kinds: metadata fields
+   * (owl:DatatypeProperty — Business definition, Last Reviewed Date, …) and
+   * label types (Acronym, Has code, … — object properties whose values are
+   * skosxl:Labels). Both are defined once at the model level and then used by
+   * concepts; neither has an inverse.
+   */
+  private _createSimpleProperty(options: {
+    label: string; domainClassId?: number; definition?: string;
+  }, rdfType: string, isLabelProperty: 0 | 1, journalKind: string): number {
+    const label = options.label.trim();
+    if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
+    if (this._one('SELECT 1 FROM properties WHERE label = ?', [label]) !== undefined) {
+      throw new ValidationFailure([{
+        field: 'label', message: `A field or type called "${label}" already exists.`
+      }]);
+    }
+    let uri = NEW_CONCEPT_NAMESPACE + slugify(label);
+    if (this._one('SELECT 1 FROM properties WHERE uri = ?', [uri]) !== undefined) {
+      uri = `${uri}-${uuid().slice(0, 8)}`;
+    }
+    const flags = JSON.stringify({
+      [RDF_TYPE]: [{ v: rdfType, t: 'i' }],
+      [RDFS_LABEL]: [{ v: label, t: 'l', lang: 'en' }],
+      ...(options.definition
+        ? { [SKOS_DEFINITION]: [{ v: options.definition, t: 'l', lang: 'en' }] }
+        : {})
+    });
+    this._run(
+      `INSERT INTO properties
+         (uri, label, domain_class_id, is_label_property, definition, flags_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [uri, label, options.domainClassId === undefined ? null : options.domainClassId,
+       isLabelProperty, options.definition || null, flags]
+    );
+    const id = this._lastId();
+    this._journal('insert', 'relationship', uri, {
+      kind: journalKind, label, domainClassId: options.domainClassId
+    });
+    return id;
+  }
+
+  /** Define a metadata field (e.g. "Risk rating"). Values live in annotations. */
+  public createMetadataField(options: {
+    label: string; domainClassId?: number; definition?: string;
+  }): number {
+    return this._createSimpleProperty(
+      options, 'http://www.w3.org/2002/07/owl#DatatypeProperty', 0, 'metadataFieldDefinition'
+    );
+  }
+
+  /** Define a label type (e.g. "Acronym"). Values live in labels. */
+  public createLabelType(options: {
+    label: string; domainClassId?: number; definition?: string;
+  }): number {
+    return this._createSimpleProperty(
+      options, OWL_OBJECT_PROPERTY, 1, 'labelTypeDefinition'
+    );
+  }
+
+  /** Rename a metadata field or label type, or change its definition. */
+  public updateSimpleProperty(propertyId: number, changes: {
+    label?: string; definition?: string;
+  }): void {
+    this.updatePropertyPair(propertyId, changes);
+  }
+
+  /**
+   * Delete a metadata field. Refused while any concept carries a value for it
+   * — those values would become orphans with no definition to display under.
+   */
+  public deleteMetadataField(propertyId: number): void {
+    const row = this._rows('SELECT uri, label FROM properties WHERE id = ?', [propertyId])[0];
+    if (!row) return;
+    const uses = Number(this._one(
+      'SELECT COUNT(*) FROM annotations WHERE predicate_uri = ?', [String(row[0])]
+    ) || 0);
+    if (uses) {
+      throw new ValidationFailure([{
+        field: 'property',
+        message: `Cannot delete "${String(row[1])}" — ${uses} value${uses === 1 ? '' : 's'} use it. Remove those first.`
+      }]);
+    }
+    this._run('DELETE FROM properties WHERE id = ?', [propertyId]);
+    this._journal('delete', 'relationship', String(row[0]), { kind: 'metadataFieldDefinition' });
+  }
+
+  /** Delete a label type. Refused while any label uses it. */
+  public deleteLabelType(propertyId: number): void {
+    const row = this._rows('SELECT uri, label FROM properties WHERE id = ?', [propertyId])[0];
+    if (!row) return;
+    const uses = Number(this._one(
+      'SELECT COUNT(*) FROM labels WHERE label_property = ?', [String(row[0])]
+    ) || 0);
+    if (uses) {
+      throw new ValidationFailure([{
+        field: 'property',
+        message: `Cannot delete "${String(row[1])}" — ${uses} label${uses === 1 ? '' : 's'} use it. Remove those first.`
+      }]);
+    }
+    this._run('DELETE FROM properties WHERE id = ?', [propertyId]);
+    this._journal('delete', 'relationship', String(row[0]), { kind: 'labelTypeDefinition' });
+  }
+
   // -- annotations (metadata) ------------------------------------------------
 
   public addAnnotation(conceptId: number, predicateUri: string, value: string, lang?: string): number {

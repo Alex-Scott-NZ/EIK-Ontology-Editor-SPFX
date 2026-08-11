@@ -1,6 +1,6 @@
 # Editor test script — Model tab & building an ontology from scratch
 
-Version 0.4.1.0. Two parts: **A** exercises the new Model tab on the real IR
+Version 0.5.0.0. Two parts: **A** exercises the new Model tab on the real IR
 ontology; **B** builds a small ontology from nothing. Every step says what you
 should see — anything different is a bug, note it and carry on. The flow
 mirrors how the IR model itself is structured (classes with colours and a
@@ -11,9 +11,10 @@ Notes:
 - The change journal grew a new entry type in 0.3.0.0, so **.sqlite files
   saved before then must be rebuilt from Turtle** (import the .ttl again)
   before editing classes in them.
-- Known gaps, on the list, not bugs: defining **metadata fields** and **label
-  types** at the model level isn't built yet — a scratch ontology offers the
-  standard SKOS note fields and the "Alternative label" role only.
+- Since 0.5.0.0 the Model tab also defines **metadata fields** and **label
+  types** — the last two things a scratch ontology couldn't do for the first
+  time. The standard SKOS notes and "Alternative label" work without any
+  definitions.
 
 ---
 
@@ -21,11 +22,15 @@ Notes:
 
 1. **Load the ontology** (import the .ttl or open a .sqlite as usual).
 2. Next to Tree and List there is now a **Model** tab. Open it.
-   - *Expect:* two tables. **Concept classes (108)** with colour swatches
+   - *Expect:* four tables. **Concept classes (108)** with colour swatches
      (Activity's should be purple-ish `#cf7bd9` — same as Semaphore), parent
      class, live concept counts (Information ≈ 1,306) and definitions.
-     **Relationship types (~142)** listed once per pair with Name, Inverse,
+     **Relationship types (72)** listed once per pair with Name, Inverse,
      From, To, Uses (has related ≈ 2,124; many are 0) and definitions.
+     **Metadata fields (22)** — Business definition, Last Reviewed Date, …
+     with usage counts (5 unnamed "(system)" rows are Semaphore internals).
+     **Label types (10)** — Acronym, Has code, Has evidence, … with usage
+     counts matching Semaphore's Concept-to-Label list.
 3. **Create a type:** New relationship type → name `Is regulated under`,
    inverse `Regulates use of`, From **Party**, To **Legislative authority**,
    definition something meaningful → Create.
@@ -71,6 +76,12 @@ must exist before concepts can be linked.
    | Mentions | Is mentioned in | Document | Any concept |
    - *Expect:* 3 pair rows. The preview line in the dialog should read
      sensibly before you hit Create (that's the domain/range talking).
+3b. **Metadata field + label type.** Still on the Model tab:
+   - New metadata field → `Risk rating`, applies to **Activity**, definition
+     "How risky this activity is."
+   - New label type → `Acronym`, applies to **Any concept**.
+   - *Expect:* one row in each table, Uses = 0. Creating a field called
+     `Performs` is refused — names are unique across all types and fields.
 4. **Concepts.** Two different routes, depending on whether the concept has a
    parent:
    - **Top-level** — the empty tree shows a dashed **"+ Add the first
@@ -110,14 +121,19 @@ must exist before concepts can be linked.
      means every concept is offered).
    - *Expect:* each link readable from both ends under the inverse name;
      wrong-direction pairings (e.g. Performs from Filing guide) not offered.
-7. **Labels with matching flags.** ACME Ltd → add an alternative label
-   `ACME` → set Case sensitivity **Case sensitive**, Stemming **Off**.
-   - *Expect:* flag chips/badges on the label like the IR data shows.
-8. **Metadata.** ACME Ltd → add metadata → the Field dropdown offers the
-   standard SKOS set (definition pre-selected, plus scope note, editorial
-   note, history note, example, comment) → definition → "A test organisation."
-   - Then hover the metadata row: a pencil edits the value in place, the bin
-     deletes it. Edit it to prove the round trip.
+7. **Labels with matching flags.** ACME Ltd → add a label → the Role dropdown
+   now offers **Acronym** (your §B3b definition) as well as Alternative
+   label. Add `ACME` as an **Acronym** → set Case sensitivity **Case
+   sensitive**, Stemming **Off**.
+   - *Expect:* flag chips/badges on the label like the IR data shows, and
+     Uses = 1 on the Acronym row back on the Model tab.
+8. **Metadata.** Tax filing → add metadata → the Field dropdown offers
+   **Risk rating** (because Tax filing is an Activity — check it is NOT
+   offered on ACME Ltd or Filing guide, whose classes don't match its
+   domain) plus the standard SKOS set → Risk rating → "High".
+   - Also add a standard one: ACME Ltd → definition → "A test organisation."
+   - Then hover a metadata row: a pencil edits the value in place, the bin
+     deletes it. Edit one to prove the round trip.
 9. **Save to SharePoint** (command bar) → *expect:* no setup needed — it
    creates `Shared Documents/Ontology` on the site and writes
    `ontology.sqlite` there; the unsaved-changes counter on "Save .sqlite"

@@ -555,12 +555,14 @@ export interface IAnnotationDialogProps {
   initialValue?: string;
   predicateUri?: string;
   db: OntologyDatabase;
+  /** Filters defined metadata fields to those whose domain fits this concept. */
+  conceptId?: number;
   onCancel: () => void;
   onSave: (predicateUri: string, value: string) => void;
 }
 
 export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
-  const { db, initialValue, predicateUri, onCancel, onSave } = props;
+  const { db, initialValue, predicateUri, conceptId, onCancel, onSave } = props;
   const [value, setValue] = React.useState(initialValue || '');
   const [pred, setPred] = React.useState(
     predicateUri || 'http://www.w3.org/2004/02/skos/core#definition'
@@ -577,14 +579,25 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
     [SKOS + 'example', 'example'],
     ['http://www.w3.org/2000/01/rdf-schema#comment', 'comment']
   ];
-  // ...merged with every predicate already used in the model, so an imported
-  // ontology offers its own vocabulary too rather than inventing new terms.
+  // ...then the model's own DEFINED fields (domain-aware — a field restricted
+  // to RDS is not offered on a Country), then any predicate already in use
+  // that neither list covers, so imported vocabulary keeps working.
   const predOptions: IDropdownOption[] = React.useMemo(() => {
     const seen: { [uri: string]: true } = {};
     const options: IDropdownOption[] = [];
+    if (conceptId !== undefined) {
+      for (const f of db.getMetadataFieldsFor(conceptId)) {
+        if (!seen[f.uri]) {
+          seen[f.uri] = true;
+          options.push({ key: f.uri, text: f.label || localName(f.uri) });
+        }
+      }
+    }
     for (const [uri, text] of standard) {
-      seen[uri] = true;
-      options.push({ key: uri, text });
+      if (!seen[uri]) {
+        seen[uri] = true;
+        options.push({ key: uri, text });
+      }
     }
     const rows = db.raw.exec(
       `SELECT predicate_uri, COUNT(*) n FROM annotations GROUP BY 1 ORDER BY n DESC LIMIT 40`
@@ -597,7 +610,7 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
     }
     return options;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db]);
+  }, [db, conceptId]);
 
   return (
     <Dialog

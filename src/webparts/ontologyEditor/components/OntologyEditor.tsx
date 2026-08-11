@@ -644,6 +644,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         return (
           <AnnotationDialog
             db={db}
+            conceptId={selectedId}
             onCancel={closeDialog}
             onSave={(pred, value) => {
               if (mutate(() => writer.addAnnotation(selectedId as number, pred, value))) closeDialog();
