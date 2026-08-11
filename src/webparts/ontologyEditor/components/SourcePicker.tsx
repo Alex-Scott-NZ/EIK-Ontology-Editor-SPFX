@@ -74,9 +74,8 @@ const SourcePicker: React.FC<ISourcePickerProps> = (props) => {
     autoBrowsed.current = true;
     setBrowsing(true);
     onBrowseLibrary(folder.trim())
-      .then(f => setFiles(f))
-      .catch(() => setFiles(undefined))
-      .finally(() => setBrowsing(false));
+      .then(f => { setFiles(f); setBrowsing(false); })
+      .catch(() => { setFiles(undefined); setBrowsing(false); });
   }, [onBrowseLibrary, folder]);
 
   const pickLocal = (input: HTMLInputElement | null, kind: SourceKind): void => {
