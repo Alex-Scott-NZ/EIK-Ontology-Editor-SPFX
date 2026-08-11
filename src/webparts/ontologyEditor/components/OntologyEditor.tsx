@@ -1,14 +1,14 @@
 import * as React from 'react';
 import {
   SearchBox, Spinner, SpinnerSize, MessageBar, MessageBarType,
-  CommandBar, ICommandBarItemProps, Pivot, PivotItem
+  CommandBar, ICommandBarItemProps, Pivot, PivotItem, Icon
 } from '@fluentui/react';
 import { SqlJsStatic } from 'sql.js';
 
 import styles from './OntologyEditor.module.scss';
 import { IOntologyEditorProps } from './IOntologyEditorProps';
 import SourcePicker, { ISourceChoice } from './SourcePicker';
-import ConceptTree from './ConceptTree';
+import ConceptTree, { ITreeFilter } from './ConceptTree';
 import ConceptList from './ConceptList';
 import ModelManager from './ModelManager';
 import ConceptDetailPane from './ConceptDetail';
@@ -50,7 +50,10 @@ type DialogState =
   | { kind: 'confirm'; title: string; message: string; act: () => void };
 
 type Stage = 'choosing' | 'working' | 'ready';
-type ViewMode = 'tree' | 'list' | 'model';
+/** The two workspaces: browsing/editing concepts, or editing the model. */
+type MainView = 'concepts' | 'model';
+/** How the left-hand browser presents concepts within the Concepts view. */
+type BrowseMode = 'tree' | 'list';
 
 /** Lets the browser repaint between import phases. */
 function yieldToBrowser(): Promise<void> {
@@ -82,14 +85,22 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [classColours, setClassColours] = React.useState<{ [id: number]: string }>({});
   const [classLabels, setClassLabels] = React.useState<{ [id: number]: string }>({});
 
-  const [view, setView] = React.useState<ViewMode>('tree');
+  const [mainView, setMainView] = React.useState<MainView>('concepts');
+  const [browse, setBrowse] = React.useState<BrowseMode>('tree');
   const [search, setSearch] = React.useState<string>('');
   const [selectedId, setSelectedId] = React.useState<number | undefined>(undefined);
   const [revealPath, setRevealPath] = React.useState<number[] | undefined>(undefined);
+  const [treeFilter, setTreeFilter] = React.useState<ITreeFilter | undefined>(undefined);
   const [sourceLabel, setSourceLabel] = React.useState<string>('');
   const [fileName, setFileName] = React.useState<string>('ontology.sqlite');
+  // Where the last-saved copy of this file lives, so Revert can reload it.
+  // Undefined for local files / scratch ontologies never saved to the library.
+  const [revertSource, setRevertSource] = React.useState<ISourceChoice | undefined>(undefined);
 
   const [writer, setWriter] = React.useState<OntologyWriter | undefined>(undefined);
+  // In-place operations (save, revert) show this over the workspace instead
+  // of unmounting it into the full-screen loading state.
+  const [busy, setBusy] = React.useState<string | undefined>(undefined);
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
   const [dialogError, setDialogError] = React.useState<string | undefined>(undefined);
   // Views memoise their queries; bumping this refetches after a mutation.
@@ -141,24 +152,34 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
    * dialog rather than as an unexplained no-op.
    * Returns true when the mutation succeeded.
    */
+  /** Refetch everything the views derive from the database. */
+  const refreshAfterChange = React.useCallback((): void => {
+    if (!writer || !db) return;
+    setStats(db.getStats());
+    // Model-tab edits can add classes/colours the tree needs.
+    setClassColours(db.getClassColourMap());
+    setClassLabels(db.getClassLabelMap());
+    setPendingChanges(writer.getChangeCount());
+    setRefreshToken(t => t + 1);
+  }, [writer, db]);
+
   const mutate = React.useCallback((fn: () => void): boolean => {
     if (!writer || !db) return false;
     try {
       setDialogError(undefined);
+      // Every edit gets its own savepoint: the Undo command steps back
+      // through them, and a failed edit rolls back instead of half-applying.
+      writer.beginUndoPoint();
       fn();
-      setStats(db.getStats());
-      // Model-tab edits can add classes/colours the tree needs.
-      setClassColours(db.getClassColourMap());
-      setClassLabels(db.getClassLabelMap());
-      setPendingChanges(writer.getChangeCount());
-      setRefreshToken(t => t + 1);
+      refreshAfterChange();
       return true;
     } catch (e) {
+      writer.undoLast();
       if (e instanceof ValidationFailure) setDialogError(e.message);
       else setDialogError(e instanceof Error ? e.message : String(e));
       return false;
     }
-  }, [writer, db]);
+  }, [writer, db, refreshAfterChange]);
 
   // -- Loading paths ---------------------------------------------------------
 
@@ -192,9 +213,19 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     adopt(OntologyDatabase.fromDatabase(result.database), label);
   }, [adopt]);
 
-  const choose = React.useCallback(async (choice: ISourceChoice): Promise<void> => {
-    setStage('working');
+  const choose = React.useCallback(async (choice: ISourceChoice, opts?: { inPlace?: boolean }): Promise<void> => {
+    // inPlace: keep the current workspace on screen (dimmed) while the file
+    // reloads, instead of tearing down to the loading screen.
+    if (opts && opts.inPlace) setBusy('Reloading last saved…');
+    else setStage('working');
     setError(undefined);
+    // Library files can be reverted to; local files and scratch ontologies
+    // have no saved copy until the first Save.
+    setRevertSource(
+      (choice.kind === 'sqlite-library' || choice.kind === 'turtle-library') && choice.path
+        ? choice
+        : undefined
+    );
     try {
       if (choice.kind === 'sqlite-local' && choice.file) {
         await openSqlite(await readLocalFileAsArrayBuffer(choice.file), choice.file.name);
@@ -226,7 +257,9 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setStage('choosing');
+      if (!(opts && opts.inPlace)) setStage('choosing');
+    } finally {
+      setBusy(undefined);
     }
   }, [fileService, openSqlite, runImport, adopt]);
 
@@ -243,6 +276,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const saveLocally = React.useCallback((name?: string): void => {
     if (!db) return;
     if (name) setFileName(name);
+    if (writer) writer.releaseUndoPoints();
     downloadBytes(db.export(), name || fileName);
     if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
   }, [db, writer, fileName]);
@@ -250,31 +284,54 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const saveToLibrary = React.useCallback(async (name?: string): Promise<void> => {
     if (!db || !fileService || !effectiveFolder) return;
     if (name) setFileName(name);
-    setProgress('Uploading to SharePoint…');
-    setStage('working');
+    setBusy('Saving to SharePoint…');
     try {
+      // Flatten the undo stack first so the export is a committed database,
+      // not a serialised mid-transaction state.
+      if (writer) writer.releaseUndoPoints();
       await fileService.ensureFolder(effectiveFolder);
       await fileService.writeFile(effectiveFolder, name || fileName, db.export());
       if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
-      setStage('ready');
+      // The library copy is now current — Revert reloads it from here on.
+      setRevertSource({
+        kind: 'sqlite-library',
+        path: `${effectiveFolder.replace(/\/$/, '')}/${name || fileName}`
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setStage('ready');
+    } finally {
+      setBusy(undefined);
     }
   }, [db, fileService, effectiveFolder, writer, fileName]);
 
   const onSearch = React.useCallback((term: string): void => {
     setSearch(term);
-    if (!db || !term.trim()) { setRevealPath(undefined); return; }
-    // In tree mode, reveal the first hit rather than leaving the user to hunt.
-    if (view === 'tree') {
-      const hits = db.searchConcepts(term.trim(), 1);
+    if (!db || !term.trim()) { setRevealPath(undefined); setTreeFilter(undefined); return; }
+    // In tree mode, prune the tree to the hits: every path to a match stays
+    // (polyhierarchy included), everything else disappears, matches bold.
+    if (browse === 'tree') {
+      const hits = db.searchConcepts(term.trim(), 200);
+      const visible: { [id: number]: true } = {};
+      const matches: { [id: number]: true } = {};
+      const stack: number[] = [];
+      for (const h of hits) {
+        matches[h.id] = true;
+        if (!visible[h.id]) { visible[h.id] = true; stack.push(h.id); }
+      }
+      while (stack.length) {
+        const id = stack.pop() as number;
+        for (const p of db.getParents(id)) {
+          if (!visible[p.id]) { visible[p.id] = true; stack.push(p.id); }
+        }
+      }
+      setTreeFilter({ visible, matches });
       if (hits.length) {
+        // Select the best hit so the detail pane and the tree agree.
         setRevealPath(db.getAncestorPath(hits[0].id));
         setSelectedId(hits[0].id);
       }
     }
-  }, [db, view]);
+  }, [db, browse]);
 
   // -- editing ---------------------------------------------------------------
 
@@ -348,32 +405,84 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     });
   }, [writer]);
 
+  const unsaved = pendingChanges - savedChanges;
+  const hasUnsaved = unsaved > 0;
+
+  // The database lives in this tab's memory — leaving the page or opening
+  // another file without saving discards every edit. Guard both exits.
+  React.useEffect(() => {
+    if (!hasUnsaved) return;
+    const warn = (e: BeforeUnloadEvent): string => {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsaved]);
+
+  // New concepts are created in place (tree ghost rows / narrower "+"), and
+  // local .sqlite downloads come straight from the SharePoint library — the
+  // bar carries the classic file triad: Open, Save, Save as.
   const commands: ICommandBarItemProps[] = [
     {
-      key: 'new', text: 'New concept', iconProps: { iconName: 'Add' },
-      onClick: () => { setDialog({ kind: 'newConcept', parent: undefined }); }
+      key: 'open', text: 'Open…', iconProps: { iconName: 'OpenFolderHorizontal' },
+      onClick: () => {
+        if (unsaved > 0) {
+          setDialog({
+            kind: 'confirm',
+            title: 'Discard unsaved changes?',
+            message: `This file has ${unsaved} unsaved change${unsaved === 1 ? '' : 's'} that exist only ` +
+                     'in this browser tab. Save first, or they are lost when another file opens.',
+            act: () => { closeDialog(); setStage('choosing'); setError(undefined); }
+          });
+          return;
+        }
+        setStage('choosing'); setError(undefined);
+      }
     },
-    {
+    ...(fileService ? [{
+      key: 'upload',
+      text: unsaved > 0 ? `Save (${unsaved} unsaved)` : 'Save',
+      iconProps: { iconName: 'CloudUpload', style: unsaved > 0 ? { color: '#a4262c' } : undefined },
+      title: `Saves ${fileName} to ${effectiveFolder}`,
+      onClick: () => { void saveToLibrary(); }
+    }] : [{
+      // No SharePoint context (e.g. local workbench) — downloading is the
+      // only way changes leave the tab.
       key: 'download',
-      text: (pendingChanges - savedChanges) > 0
-        ? `Save .sqlite (${pendingChanges - savedChanges} unsaved)`
-        : 'Save .sqlite',
+      text: unsaved > 0 ? `Save .sqlite (${unsaved} unsaved)` : 'Save .sqlite',
       title: `Downloads ${fileName}`,
       iconProps: { iconName: 'Download' },
       onClick: () => { saveLocally(); }
-    },
-    ...(fileService ? [{
-      key: 'upload', text: 'Save to SharePoint', iconProps: { iconName: 'CloudUpload' },
-      title: `Saves ${fileName} to ${effectiveFolder}`,
-      onClick: () => { void saveToLibrary(); }
-    }] : []),
+    }]),
     {
       key: 'saveAs', text: 'Save as…', iconProps: { iconName: 'SaveAs' },
       onClick: () => { setDialog({ kind: 'saveAs' }); }
     },
     {
-      key: 'switch', text: 'Open another…', iconProps: { iconName: 'OpenFolderHorizontal' },
-      onClick: () => { setStage('choosing'); setError(undefined); }
+      key: 'undo', text: 'Undo', iconProps: { iconName: 'Undo' },
+      title: 'Undo the most recent change (repeat to step further back; stops at the last save)',
+      disabled: !writer || !writer.canUndo(),
+      onClick: () => { if (writer && writer.undoLast()) refreshAfterChange(); }
+    },
+    {
+      key: 'revert', text: 'Revert', iconProps: { iconName: 'History' },
+      title: revertSource
+        ? 'Throw away ALL unsaved changes and reload the last-saved copy'
+        : 'Nothing to revert to — this file has never been saved to the library',
+      disabled: unsaved === 0 || !revertSource,
+      onClick: () => {
+        const src = revertSource;
+        if (!src) return;
+        setDialog({
+          kind: 'confirm',
+          title: 'Revert to last saved?',
+          message: `Throw away ${unsaved} unsaved change${unsaved === 1 ? '' : 's'} and reload ` +
+                   `${src.path ? src.path.split('/').pop() : 'the file'} as last saved?`,
+          act: () => { closeDialog(); void choose(src, { inPlace: true }); }
+        });
+      }
     }
   ];
 
@@ -409,6 +518,11 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
   return (
     <div className={styles.ontologyEditor}>
+      {busy && (
+        <div className={styles.busyOverlay}>
+          <Spinner size={SpinnerSize.large} label={busy} />
+        </div>
+      )}
       {error && (
         <MessageBar messageBarType={MessageBarType.warning} onDismiss={() => setError(undefined)}>
           {error}
@@ -419,26 +533,36 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
       {stats && (
         <div className={styles.statusBar}>
-          <span title={sourceLabel}>{sourceLabel}</span>
+          <span title={sourceLabel}>
+            <Icon iconName="Database" className={styles.statusBarIcon} /> {sourceLabel}
+          </span>
           <span>{stats.concepts.toLocaleString()} concepts</span>
           <span>{stats.classes} classes</span>
           <span>{stats.properties} relationship types</span>
           <span>{stats.relationships.toLocaleString()} relationships</span>
           <span>{stats.broaderEdges.toLocaleString()} hierarchy edges</span>
+          {unsaved > 0 && (
+            <span className={styles.unsavedBadge}>
+              ● {unsaved} unsaved change{unsaved === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
       )}
 
+      {/* Two real workspaces; tabs format makes the active one unmistakable.
+          Tree/List is not a sibling — it only flips the left-hand browser,
+          so it lives beside the search box below. */}
       <Pivot
-        selectedKey={view}
-        onLinkClick={item => setView((item && item.props.itemKey as ViewMode) || 'tree')}
+        selectedKey={mainView}
+        onLinkClick={item => setMainView((item && item.props.itemKey as MainView) || 'concepts')}
+        linkFormat="tabs"
         className={styles.viewPivot}
       >
-        <PivotItem headerText="Tree" itemKey="tree" itemIcon="BulletedTreeList" />
-        <PivotItem headerText="List" itemKey="list" itemIcon="BulletedList" />
+        <PivotItem headerText="Concepts" itemKey="concepts" itemIcon="BulletedTreeList" />
         <PivotItem headerText="Model" itemKey="model" itemIcon="Org" />
       </Pivot>
 
-      {view === 'model' && writer ? (
+      {mainView === 'model' && writer ? (
         <ModelManager
           db={db}
           writer={writer}
@@ -450,20 +574,45 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       ) : (
         <div className={styles.panes}>
           <div className={styles.leftPane}>
-            <SearchBox
-              placeholder="Search concepts, acronyms, codes…"
-              value={search}
-              onChange={(_, v) => onSearch(v || '')}
-              onClear={() => onSearch('')}
-            />
+            <div className={styles.leftPaneHeader}>
+              <div className={styles.leftPaneSearch}>
+                <SearchBox
+                  placeholder="Search concepts, acronyms, codes…"
+                  value={search}
+                  onChange={(_, v) => onSearch(v || '')}
+                  onClear={() => onSearch('')}
+                />
+              </div>
+              <button
+                type="button"
+                className={browse === 'tree' ? styles.browseBtnActive : styles.browseBtn}
+                title="Browse as hierarchy"
+                aria-label="Browse as hierarchy"
+                aria-pressed={browse === 'tree'}
+                onClick={() => setBrowse('tree')}
+              >
+                <Icon iconName="BulletedTreeList" />
+              </button>
+              <button
+                type="button"
+                className={browse === 'list' ? styles.browseBtnActive : styles.browseBtn}
+                title="Browse as flat list"
+                aria-label="Browse as flat list"
+                aria-pressed={browse === 'list'}
+                onClick={() => setBrowse('list')}
+              >
+                <Icon iconName="BulletedList" />
+              </button>
+            </div>
 
             <div className={styles.leftPaneBody}>
-              {view === 'tree' ? (
+              {browse === 'tree' ? (
                 <ConceptTree
                   db={db}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   revealPath={revealPath}
+                  filter={treeFilter}
                   onAddChild={onTreeAddChild}
                   onDelete={onTreeDelete}
                   onAddRoot={() => setDialog({ kind: 'newConcept', parent: undefined })}
@@ -690,11 +839,12 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         return (
           <AnnotationDialog
             db={db}
+            conceptId={selectedId}
             predicateUri={dialog.annotation.predicateUri}
             initialValue={dialog.annotation.value}
             onCancel={closeDialog}
-            onSave={(_pred, value) => {
-              if (mutate(() => writer.updateAnnotation(dialog.annotation.id, value))) closeDialog();
+            onSave={(pred, value) => {
+              if (mutate(() => writer.replaceAnnotation(dialog.annotation.id, pred, value))) closeDialog();
             }}
           />
         );

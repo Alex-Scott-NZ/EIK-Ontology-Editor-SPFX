@@ -69,6 +69,8 @@ export class OntologyWriter {
   private _author: string;
   private _dirty: boolean = false;
   private _namespace: string;
+  /** Open SAVEPOINTs, one per edit this session — the undo stack. */
+  private _undoDepth: number = 0;
 
   public constructor(db: Database, author: string) {
     this._db = db;
@@ -91,6 +93,46 @@ export class OntologyWriter {
 
   public markClean(): void {
     this._dirty = false;
+    // Saving flattens the undo stack: beyond the saved state, Revert (reload
+    // the saved file) is the way back, not Undo.
+    this.releaseUndoPoints();
+  }
+
+  // -- undo ------------------------------------------------------------------
+  //
+  // Each edit runs inside its own SQLite SAVEPOINT. Undo rolls the database
+  // back one savepoint — data, labels, relationships AND the journal rows the
+  // edit wrote, with no hand-maintained inverse operations to drift wrong.
+
+  /** Opens a savepoint for the edit about to run. */
+  public beginUndoPoint(): void {
+    this._undoDepth++;
+    this._run(`SAVEPOINT undo_${this._undoDepth}`);
+  }
+
+  /**
+   * Rolls back to the most recent savepoint: undoes the last edit, or wipes
+   * the partial writes of an edit that failed mid-way. Returns false when
+   * there is nothing to undo.
+   */
+  public undoLast(): boolean {
+    if (this._undoDepth <= 0) return false;
+    this._run(`ROLLBACK TO undo_${this._undoDepth}`);
+    this._run(`RELEASE undo_${this._undoDepth}`);
+    this._undoDepth--;
+    return true;
+  }
+
+  public canUndo(): boolean {
+    return this._undoDepth > 0;
+  }
+
+  /** Commits everything and empties the undo stack. */
+  public releaseUndoPoints(): void {
+    if (this._undoDepth <= 0) return;
+    // Releasing the outermost savepoint releases all nested ones.
+    this._run('RELEASE undo_1');
+    this._undoDepth = 0;
   }
 
   // -- internals -------------------------------------------------------------
@@ -956,6 +998,23 @@ export class OntologyWriter {
     this._run('UPDATE annotations SET value = ? WHERE id = ?', [value, annotationId]);
     this._journal('update', 'annotation', before ? this._conceptUri(Number(before[2])) : undefined,
       { predicateUri: before ? before[1] : undefined, before: before ? before[0] : undefined, after: value });
+  }
+
+  /** Change an annotation's field and/or value in one edit. */
+  public replaceAnnotation(annotationId: number, predicateUri: string, value: string): void {
+    const before = this._rows(
+      'SELECT value, predicate_uri, concept_id FROM annotations WHERE id = ?', [annotationId]
+    )[0];
+    this._run(
+      'UPDATE annotations SET predicate_uri = ?, value = ? WHERE id = ?',
+      [predicateUri, value, annotationId]
+    );
+    this._journal('update', 'annotation', before ? this._conceptUri(Number(before[2])) : undefined, {
+      predicateUri,
+      previousPredicate: before && before[1] !== predicateUri ? before[1] : undefined,
+      before: before ? before[0] : undefined,
+      after: value
+    });
   }
 
   public deleteAnnotation(annotationId: number): void {

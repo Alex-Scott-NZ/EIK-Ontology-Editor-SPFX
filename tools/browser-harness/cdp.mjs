@@ -14,6 +14,9 @@ async function targets() {
 
 function pickPage(list) {
   return (
+    // Prefer the ontology editor page — target order is MRU and the session
+    // often has several SharePoint tabs (catalog, admin) open.
+    list.find((t) => t.type === "page" && /Ontology-Editor/i.test(t.url)) ||
     list.find((t) => t.type === "page" && /sharepoint\.com/.test(t.url)) ||
     list.find((t) => t.type === "page")
   );

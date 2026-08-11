@@ -4,12 +4,24 @@ import styles from './OntologyEditor.module.scss';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { ITreeNode } from '../../../models/IOntology';
 
+/**
+ * Search-driven pruning: only `visible` nodes render (matches plus every
+ * ancestor on every path to them — polyhierarchy included), all forced open,
+ * with `matches` emphasised. Cleared when the search box empties.
+ */
+export interface ITreeFilter {
+  visible: { [id: number]: true };
+  matches: { [id: number]: true };
+}
+
 export interface IConceptTreeProps {
   db: OntologyDatabase;
   selectedId?: number;
   onSelect: (conceptId: number) => void;
   /** Ancestor chain to expand and reveal, e.g. after a search hit. */
   revealPath?: number[];
+  /** Prune the tree to search hits and their ancestor paths. */
+  filter?: ITreeFilter;
   /** Editing affordances; omit for a read-only tree. */
   onAddChild?: (parent: ITreeNode) => void;
   onDelete?: (node: ITreeNode) => void;
@@ -27,6 +39,7 @@ interface IRowProps {
   toggle: (id: number) => void;
   selectedId?: number;
   onSelect: (id: number) => void;
+  filter?: ITreeFilter;
   onAddChild?: (parent: ITreeNode) => void;
   onDelete?: (node: ITreeNode) => void;
   refreshToken?: number;
@@ -41,20 +54,32 @@ interface IRowProps {
  */
 const TreeRow: React.FC<IRowProps> = (props) => {
   const { node, depth, db, expanded, toggle, selectedId, onSelect,
-          onAddChild, onDelete, refreshToken } = props;
-  const isOpen = !!expanded[node.id];
-  const children = React.useMemo(
-    () => (isOpen ? db.getChildNodes(node.id) : []),
-    [isOpen, node.id, db, refreshToken]
-  );
+          filter, onAddChild, onDelete, refreshToken } = props;
+  // While filtering, every surviving branch is held open.
+  const isOpen = filter ? true : !!expanded[node.id];
+  const children = React.useMemo(() => {
+    const all = isOpen ? db.getChildNodes(node.id) : [];
+    return filter ? all.filter(c => filter.visible[c.id]) : all;
+  }, [isOpen, node.id, db, refreshToken, filter]);
+
+  const isSelected = selectedId === node.id;
+  const rowRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (isSelected && rowRef.current && rowRef.current.scrollIntoView) {
+      rowRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isSelected]);
+
+  const hasChevron = filter ? children.length > 0 : node.childCount > 0;
 
   return (
     <>
       <div
-        className={`${styles.treeRow} ${selectedId === node.id ? styles.treeRowSelected : ''}`}
+        ref={rowRef}
+        className={`${styles.treeRow} ${isSelected ? styles.treeRowSelected : ''}`}
         style={{ paddingLeft: 8 + depth * 16 }}
       >
-        {node.childCount > 0 ? (
+        {hasChevron ? (
           <button
             type="button"
             className={styles.treeChevron}
@@ -70,7 +95,9 @@ const TreeRow: React.FC<IRowProps> = (props) => {
 
         <button
           type="button"
-          className={styles.treeLabel}
+          className={filter && filter.matches[node.id]
+            ? `${styles.treeLabel} ${styles.treeMatch}`
+            : styles.treeLabel}
           onClick={() => onSelect(node.id)}
           title={node.prefLabel || node.uri}
         >
@@ -116,6 +143,7 @@ const TreeRow: React.FC<IRowProps> = (props) => {
           toggle={toggle}
           selectedId={selectedId}
           onSelect={onSelect}
+          filter={filter}
           onAddChild={onAddChild}
           onDelete={onDelete}
           refreshToken={refreshToken}
@@ -130,8 +158,13 @@ const TreeRow: React.FC<IRowProps> = (props) => {
  * Classification, …) — the model's upper ontology.
  */
 const ConceptTree: React.FC<IConceptTreeProps> = (props) => {
-  const { db, selectedId, onSelect, revealPath, onAddChild, onDelete, onAddRoot, refreshToken } = props;
-  const roots = React.useMemo(() => db.getRootNodes(), [db, refreshToken]);
+  const { db, selectedId, onSelect, revealPath, filter,
+          onAddChild, onDelete, onAddRoot, refreshToken } = props;
+  const allRoots = React.useMemo(() => db.getRootNodes(), [db, refreshToken]);
+  const roots = React.useMemo(
+    () => (filter ? allRoots.filter(r => filter.visible[r.id]) : allRoots),
+    [allRoots, filter]
+  );
   const [expanded, setExpanded] = React.useState<{ [id: number]: true }>({});
 
   const toggle = React.useCallback((id: number): void => {
@@ -154,6 +187,9 @@ const ConceptTree: React.FC<IConceptTreeProps> = (props) => {
 
   return (
     <div className={styles.tree}>
+      {filter && roots.length === 0 && (
+        <div className={styles.emptyState}>No concepts match.</div>
+      )}
       {roots.map(root => (
         <TreeRow
           key={root.id}
@@ -164,12 +200,13 @@ const ConceptTree: React.FC<IConceptTreeProps> = (props) => {
           toggle={toggle}
           selectedId={selectedId}
           onSelect={onSelect}
+          filter={filter}
           onAddChild={onAddChild}
           onDelete={onDelete}
           refreshToken={refreshToken}
         />
       ))}
-      {onAddRoot && (
+      {onAddRoot && !filter && (
         <button type="button" className={styles.ghostRow} onClick={onAddRoot}>
           <Icon iconName="Add" />
           <span>{roots.length ? 'New top concept' : 'Add the first concept'}</span>

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton,
-  TextField, Dropdown, IDropdownOption, SearchBox, MessageBar, MessageBarType,
+  TextField, Dropdown, IDropdownOption, ComboBox, SearchBox, MessageBar, MessageBarType,
   ChoiceGroup, IChoiceGroupOption, Label as FluentLabel
 } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
@@ -203,11 +203,13 @@ export const ConceptPickerDialog: React.FC<IConceptPickerDialogProps> = (props) 
   const [term, setTerm] = React.useState('');
 
   // With a property in hand, offer only concepts its range permits — the user
-  // never sees a choice that validation would then reject.
+  // never sees a choice that validation would then reject. An empty search
+  // shows the first candidates rather than an empty list, so there is always
+  // something to pick from.
   const results = React.useMemo(() => {
     const rows = propertyId !== undefined
       ? db.getValidTargets(propertyId, term, 60)
-      : (term.trim() ? db.searchConcepts(term, 60) : []);
+      : db.searchConcepts(term.trim(), 60);
     return rows.filter(c => c.id !== excludeConceptId);
   }, [db, propertyId, term, excludeConceptId]);
 
@@ -236,9 +238,7 @@ export const ConceptPickerDialog: React.FC<IConceptPickerDialogProps> = (props) 
           </button>
         ))}
         {results.length === 0 && (
-          <div className={styles.muted} style={{ padding: 8 }}>
-            {term.trim() ? 'No matches.' : 'Type to search.'}
-          </div>
+          <div className={styles.muted} style={{ padding: 8 }}>No matches.</div>
         )}
       </div>
       <DialogFooter>
@@ -417,7 +417,16 @@ export const PropertyPicker: React.FC<{
   onPick: (propertyId: number, propertyLabel: string) => void;
   /** Offers "define a new type" inline, so a missing type is not a dead end. */
   onDefineNew?: () => void;
-}> = ({ properties, onCancel, onPick, onDefineNew }) => (
+}> = ({ properties, onCancel, onPick, onDefineNew }) => {
+  const [term, setTerm] = React.useState('');
+  const needle = term.trim().toLowerCase();
+  const shown = needle
+    ? properties.filter(p =>
+        (p.label || '').toLowerCase().indexOf(needle) >= 0 ||
+        (p.definition || '').toLowerCase().indexOf(needle) >= 0 ||
+        (p.rangeClassName || '').toLowerCase().indexOf(needle) >= 0)
+    : properties;
+  return (
   <Dialog
     hidden={false}
     onDismiss={onCancel}
@@ -429,8 +438,13 @@ export const PropertyPicker: React.FC<{
     modalProps={{ isBlocking: true }}
     minWidth={560}
   >
+    <SearchBox
+      placeholder="Filter relationship types…"
+      value={term}
+      onChange={(_, v) => setTerm(v || '')}
+    />
     <div className={styles.pickerResults}>
-      {properties.map(p => (
+      {shown.map(p => (
         <button
           key={p.propertyId}
           type="button"
@@ -448,10 +462,11 @@ export const PropertyPicker: React.FC<{
           </span>
         </button>
       ))}
-      {properties.length === 0 && (
+      {shown.length === 0 && (
         <div className={styles.muted} style={{ padding: 8 }}>
-          No relationships are declared for this concept&rsquo;s class. Give it a
-          class, or define a new relationship type below.
+          {properties.length === 0
+            ? 'No relationships are declared for this concept’s class. Give it a class, or define a new relationship type below.'
+            : 'No relationship types match the filter.'}
         </div>
       )}
     </div>
@@ -466,7 +481,8 @@ export const PropertyPicker: React.FC<{
       <DefaultButton text="Cancel" onClick={onCancel} />
     </DialogFooter>
   </Dialog>
-);
+  );
+};
 
 /* --------------------------------------------- new relationship TYPE -- */
 
@@ -658,8 +674,12 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
     if (rows.length) {
       for (const r of rows[0].values) {
         const uri = String(r[0]);
-        if (!seen[uri]) options.push({ key: uri, text: localName(uri) });
+        if (!seen[uri]) { seen[uri] = true; options.push({ key: uri, text: localName(uri) }); }
       }
+    }
+    // The field being edited must be selectable even if nothing above found it.
+    if (predicateUri && !seen[predicateUri]) {
+      options.push({ key: predicateUri, text: localName(predicateUri) });
     }
     return options;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -676,12 +696,16 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
       modalProps={{ isBlocking: true }}
       minWidth={520}
     >
-      <Dropdown
+      {/* ComboBox, not Dropdown: the model defines dozens of fields, so
+          typing filters the list down to what you're after. */}
+      <ComboBox
         label="Field"
         selectedKey={pred}
         options={predOptions}
-        disabled={!!predicateUri}
-        onChange={(_, o) => setPred(String(o ? o.key : pred))}
+        allowFreeform={false}
+        autoComplete="on"
+        useComboBoxAsMenuWidth
+        onChange={(_, o) => { if (o) setPred(String(o.key)); }}
       />
       <TextField label="Value" multiline rows={5} autoFocus value={value} onChange={(_, v) => setValue(v || '')} />
       <DialogFooter>

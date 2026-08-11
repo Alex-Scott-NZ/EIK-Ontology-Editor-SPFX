@@ -570,8 +570,11 @@ export class OntologyDatabase {
    */
   public getValidTargets(propertyId: number, search?: string, limit: number = 50): IConcept[] {
     const like = search ? `%${search}%` : '%';
+    // Matches alt labels too — people find "Puka tāke" or "IR3" by what they
+    // know it as, not only by the preferred label.
     return this._rows(
-      `SELECT ${OntologyDatabase.CONCEPT_COLS} FROM concepts c
+      `SELECT DISTINCT ${OntologyDatabase.CONCEPT_COLS} FROM concepts c
+       LEFT JOIN labels l ON l.concept_id = c.id
        WHERE (
          (SELECT range_class_id FROM properties WHERE id = ?) IS NULL
          OR c.class_id IN (
@@ -579,10 +582,10 @@ export class OntologyDatabase {
            WHERE a.ancestor_id = (SELECT range_class_id FROM properties WHERE id = ?)
          )
        )
-       AND c.pref_label LIKE ?
+       AND (c.pref_label LIKE ? OR l.literal_form LIKE ?)
        ORDER BY c.pref_label
        LIMIT ?`,
-      [propertyId, propertyId, like, limit]
+      [propertyId, propertyId, like, like, limit]
     ).map(r => this._conceptFromRow(r));
   }
 

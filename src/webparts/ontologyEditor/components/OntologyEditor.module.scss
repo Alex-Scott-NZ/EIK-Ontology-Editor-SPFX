@@ -5,6 +5,22 @@
   flex-direction: column;
   gap: 8px;
   color: "[theme:bodyText, default:#323130]";
+  /* On the single-part app page the web part owns the whole canvas — keep
+     everything off the page edges. */
+  padding: 8px 16px 16px;
+  position: relative; /* anchors the busy overlay */
+}
+
+/* Dim-and-wait cover for in-place saves and reverts: the workspace stays
+   mounted underneath instead of vanishing into the loading screen. */
+.busyOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .muted {
@@ -82,21 +98,40 @@
   border-bottom: 1px solid "[theme:neutralLight, default:#edebe9]";
 }
 
+/* File/model information strip: tinted so it reads as metadata about the
+   loaded source, ruled off below to separate it from the view tabs. */
 .statusBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 0 8px;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 12px;
   font-size: 12px;
   color: "[theme:neutralSecondary, default:#605e5c]";
+  background: "[theme:neutralLighter, default:#f3f2f1]";
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
 
+  /* The full path of the loaded file — never truncated, wraps if it must. */
   > span:first-child {
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-weight: 600;
+    color: "[theme:bodyText, default:#323130]";
+    overflow-wrap: anywhere;
   }
+}
+
+.statusBarIcon {
+  font-size: 12px;
+  color: "[theme:themePrimary, default:#0078d4]";
+  vertical-align: -1px;
+  margin-right: 2px;
+}
+
+/* Edits that exist only in this tab. Red, because losing them is one
+   navigation away. */
+.unsavedBadge {
+  font-weight: 600;
+  color: "[theme:redDark, default:#a4262c]";
 }
 
 .panes {
@@ -110,11 +145,15 @@
   flex: 0 0 340px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid "[theme:neutralLight, default:#edebe9]";
   border-radius: 4px;
-  padding: 8px;
+  padding: 12px;
   min-width: 0;
+  /* Stays in view while a long concept card scrolls the page. */
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
 }
 
 .leftPaneBody {
@@ -123,15 +162,55 @@
   max-height: 620px;
 }
 
+/* The Concepts | Model workspace tabs (linkFormat="tabs" colours the active
+   one) — no rule underneath, the tabs themselves are the separator. */
 .viewPivot {
-  border-bottom: 1px solid "[theme:neutralLighter, default:#f3f2f1]";
+  margin-top: 2px;
 }
 
+/* Search box + tree/list toggle share the browser pane's header line. */
+.leftPaneHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.leftPaneSearch {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browseBtn,
+.browseBtnActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: "[theme:neutralSecondary, default:#605e5c]";
+
+  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
+}
+
+.browseBtnActive {
+  background: "[theme:themeLighter, default:#deecf9]";
+  color: "[theme:themeDarker, default:#004578]";
+
+  &:hover { background: "[theme:themeLighter, default:#deecf9]"; }
+}
+
+/* Grows with its content — the page scrolls, not a box within the page.
+   (The left browser keeps its own scroll so the tree stays usable beside a
+   long concept card.) */
 .rightPane {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: auto;
-  max-height: 700px;
+  align-self: flex-start;
   border: 1px solid "[theme:neutralLight, default:#edebe9]";
   border-radius: 4px;
 }
@@ -173,6 +252,11 @@
 .treeChevronSpacer {
   flex: 0 0 auto;
   width: 20px;
+}
+
+/* A search hit in the filtered tree; ancestors stay regular weight. */
+.treeMatch {
+  font-weight: 600;
 }
 
 .treeLabel {
@@ -276,25 +360,75 @@
 
 .detailColumns {
   display: flex;
-  gap: 32px;
   align-items: flex-start;
-  flex-wrap: wrap;
 }
 
 .detailColumn {
-  flex: 1 1 320px;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: 240px;
 }
 
-.detailSection { margin-bottom: 20px; }
+/* Breathing room either side of the splitter: the left column keeps its
+   content off the centre line's left, the right column off its right. */
+.detailColumn:first-child { padding-right: 16px; }
+.detailColumn:last-child { padding-left: 16px; }
+
+/* Draggable split between the two columns. The 17px strip is the grab
+   target; the visible line is 1px until you reach for it. */
+.detailSplitter {
+  flex: 0 0 17px;
+  align-self: stretch;
+  cursor: col-resize;
+  display: flex;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+
+  &::after {
+    content: '';
+    width: 1px;
+    background: "[theme:neutralLight, default:#edebe9]";
+  }
+
+  &:hover::after,
+  &:focus-visible::after {
+    width: 3px;
+    background: "[theme:themePrimary, default:#0078d4]";
+  }
+}
+
+/* Each section is a contained card: tinted header band holding the icon,
+   title, count and the add action; the rows live inside the box. Groups the
+   pane visually — a busy concept reads as seven tidy boxes, not sixty
+   floating lines. */
+.detailSection {
+  margin-bottom: 14px;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
+  background: "[theme:white, default:#ffffff]";
+  overflow: hidden; /* clips the header band to the rounded corners */
+}
 
 .detailSectionHeading {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0;
+  padding: 7px 12px;
+  font-size: 13px;
   font-weight: 600;
+  background: "[theme:neutralLighterAlt, default:#faf9f8]";
+  border-bottom: 1px solid "[theme:neutralLight, default:#edebe9]";
+
+  /* The add action sits right after the title and count — docking it to the
+     band's right edge made it invisible on wide screens. */
+  .rowActionAdd { margin-left: 4px; }
+}
+
+.detailSectionBody {
+  padding: 8px 12px;
 }
 
 .detailSectionIcon {
@@ -471,19 +605,46 @@
   transition: opacity 0.1s ease-in;
 }
 
-/* In the detail pane the actions overlay the row's right edge instead of
-   taking layout space — otherwise the hidden buttons wrap to an invisible
-   second line on long rows, which read as random extra spacing. (Tree rows
-   keep the in-flow version: they never wrap, and the label truncates.) */
+/* In the detail pane the actions sit directly after the row's content and
+   collapse to zero width while hidden — so they never take layout space
+   (which made hidden buttons wrap to an invisible second line on long rows,
+   reading as random extra spacing). (Tree rows keep the in-flow version:
+   they never wrap, and the label truncates.) */
 .labelRow .rowActions,
 .linkRow .rowActions,
 .metadataName .rowActions {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 0;
-  background: "[theme:white, default:#ffffff]";
+  margin-left: 2px;
+  padding-left: 0;
+  max-width: 0;
+  overflow: hidden;
+}
+
+.labelRow:hover .rowActions,
+.labelRow:focus-within .rowActions,
+.linkRow:hover .rowActions,
+.linkRow:focus-within .rowActions,
+.metadataName:hover .rowActions,
+.metadataName:focus-within .rowActions {
+  max-width: 80px;
+  overflow: visible;
+}
+
+/* Editable rows announce themselves on hover (edit mode only — the class is
+   set when edit handlers are wired). */
+.detailEditable .labelRow,
+.detailEditable .linkRow,
+.detailEditable .metadataField {
+  padding-left: 4px;
+  padding-right: 4px;
+  margin-left: -4px;
+  margin-right: -4px;
+  border-radius: 2px;
+}
+
+.detailEditable .labelRow:hover,
+.detailEditable .linkRow:hover,
+.detailEditable .metadataField:hover {
+  background: "[theme:neutralLighter, default:#f3f2f1]";
 }
 
 .treeRow:hover .rowActions,
@@ -500,9 +661,9 @@
   pointer-events: auto;
 }
 
-/* Ghost icon buttons, matching the Fluent IconButtons used on the Model tab.
-   Colour identifies the verb (edit neutral, delete red, add green); the fill
-   only appears on hover so rows stay quiet until you reach for them. */
+/* One colour per verb, everywhere: add green, edit blue, delete red. At rest
+   they are quiet coloured glyphs; on hover the button fills solid with a
+   white icon, so what you are about to do is unmissable. */
 .rowActionAdd,
 .rowActionDelete,
 .rowActionEdit {
@@ -516,23 +677,31 @@
   background: transparent;
   cursor: pointer;
   font-size: 12px;
-
-  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
+  transition: background 0.08s ease-in, color 0.08s ease-in;
 }
 
 .rowActionAdd {
   color: "[theme:green, default:#107c10]";
-  &:hover { color: #0b5a0b; }
+  &:hover {
+    background: "[theme:green, default:#107c10]";
+    color: "[theme:white, default:#ffffff]";
+  }
 }
 
 .rowActionDelete {
   color: "[theme:redDark, default:#a4262c]";
-  &:hover { color: #7a1c21; }
+  &:hover {
+    background: "[theme:redDark, default:#a4262c]";
+    color: "[theme:white, default:#ffffff]";
+  }
 }
 
 .rowActionEdit {
-  color: "[theme:neutralSecondary, default:#605e5c]";
-  &:hover { color: "[theme:themePrimary, default:#0078d4]"; }
+  color: "[theme:themePrimary, default:#0078d4]";
+  &:hover {
+    background: "[theme:themePrimary, default:#0078d4]";
+    color: "[theme:white, default:#ffffff]";
+  }
 }
 
 .detailTitle .rowActionEdit {
@@ -615,15 +784,43 @@
   }
 }
 
-.modelSectionHeader {
+/* Pill row for jumping straight to a model section. */
+.modelJumpBar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 10px;
+}
 
-  h3 {
-    margin: 8px 0;
-  }
+.jumpPill {
+  padding: 3px 12px;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 12px;
+  background: "[theme:white, default:#ffffff]";
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: "[theme:themePrimary, default:#0078d4]";
+
+  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
+}
+
+/* The model section header band doubles as the fold toggle. */
+.modelSectionToggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.detailSectionChevron {
+  font-size: 10px;
+  color: "[theme:neutralSecondary, default:#605e5c]";
+}
+
+/* Filter box under the section blurb. */
+.modelSectionFilter {
+  max-width: 320px;
+  margin-bottom: 10px;
 }
 
 .ghostRow {

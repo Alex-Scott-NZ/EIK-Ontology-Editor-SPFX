@@ -67,32 +67,64 @@ function looksLikePattern(form: string): boolean {
   return /[*~#]/.test(form) || /^\\|\\$/.test(form);
 }
 
+const SECTION_FOLDS_KEY = 'ontologyEditor.conceptSections';
+
+function savedFolds(): { [title: string]: boolean } {
+  try { return JSON.parse(window.localStorage.getItem(SECTION_FOLDS_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+
+/**
+ * A card section, foldable from its header band. Folds are remembered per
+ * section NAME (not per concept) — collapse Identity once and it stays
+ * collapsed on every concept you visit.
+ */
 const Section: React.FC<{
   icon: string; title: string; count?: number;
   addLabel?: string; onAdd?: () => void;
   children?: React.ReactNode;
-}> = ({ icon, title, count, addLabel, onAdd, children }) => (
-  <section className={styles.detailSection}>
-    <h3 className={styles.detailSectionHeading}>
-      <Icon iconName={icon} className={styles.detailSectionIcon} />
-      {title}
-      {count !== undefined && <span className={styles.countChip}>{count}</span>}
-      {/* The verb lives in the tooltip; the header line stays quiet. */}
-      {onAdd && (
-        <button
-          type="button"
-          className={styles.rowActionAdd}
-          title={addLabel || 'Add'}
-          aria-label={addLabel || 'Add'}
-          onClick={onAdd}
-        >
-          <Icon iconName="Add" />
-        </button>
-      )}
-    </h3>
-    {children}
-  </section>
-);
+}> = ({ icon, title, count, addLabel, onAdd, children }) => {
+  const [folded, setFolded] = React.useState<boolean>(() => savedFolds()[title] === true);
+  const toggle = (): void => setFolded(f => {
+    const next = !f;
+    const all = savedFolds();
+    all[title] = next;
+    try { window.localStorage.setItem(SECTION_FOLDS_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+    return next;
+  });
+  return (
+    <section className={styles.detailSection}>
+      <h3
+        className={`${styles.detailSectionHeading} ${styles.modelSectionToggle}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!folded}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        }}
+      >
+        <Icon iconName={folded ? 'ChevronRight' : 'ChevronDown'} className={styles.detailSectionChevron} />
+        <Icon iconName={icon} className={styles.detailSectionIcon} />
+        {title}
+        {count !== undefined && <span className={styles.countChip}>{count}</span>}
+        {/* The verb lives in the tooltip; the header band stays quiet. */}
+        {onAdd && (
+          <button
+            type="button"
+            className={styles.rowActionAdd}
+            title={addLabel || 'Add'}
+            aria-label={addLabel || 'Add'}
+            onClick={(e) => { e.stopPropagation(); onAdd(); }}
+          >
+            <Icon iconName="Add" />
+          </button>
+        )}
+      </h3>
+      {!folded && <div className={styles.detailSectionBody}>{children}</div>}
+    </section>
+  );
+};
 
 const ConceptChip: React.FC<{
   concept: IConcept;
@@ -153,6 +185,15 @@ const LabelRow: React.FC<{ label: ILabel; edit?: IConceptEditHandlers }> = ({ la
  * Concept detail, laid out like Semaphore's Details tab: identity and labels on
  * the left, the concept's place in the graph on the right.
  */
+const SPLIT_KEY = 'ontologyEditor.detailSplit';
+
+function savedSplit(): number {
+  try {
+    const n = Number(window.localStorage.getItem(SPLIT_KEY));
+    return n >= 25 && n <= 75 ? n : 50;
+  } catch { return 50; }
+}
+
 const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
   const { db, conceptId, onNavigate, classColours, classLabels, edit, refreshToken } = props;
 
@@ -163,6 +204,30 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
     () => db.getChildren(conceptId), [db, conceptId, refreshToken]
   );
 
+  // Left/right column split (%), draggable and remembered per browser.
+  const [split, setSplit] = React.useState<number>(savedSplit);
+  const columnsRef = React.useRef<HTMLDivElement | null>(null);
+
+  const applySplit = React.useCallback((pct: number): void => {
+    const clamped = Math.min(75, Math.max(25, pct));
+    setSplit(clamped);
+    try { window.localStorage.setItem(SPLIT_KEY, String(Math.round(clamped * 10) / 10)); } catch { /* private mode */ }
+  }, []);
+
+  const startSplitDrag = React.useCallback((e: React.PointerEvent): void => {
+    e.preventDefault();
+    const el = columnsRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const move = (ev: PointerEvent): void => applySplit(((ev.clientX - rect.left) / rect.width) * 100);
+    const up = (): void => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  }, [applySplit]);
+
   if (!detail) return <div className={styles.emptyState}>Concept not found.</div>;
 
   const prefLabels = detail.labels.filter(l => l.labelProperty === SKOSXL_PREF_LABEL);
@@ -170,7 +235,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
   const colour = detail.classId !== undefined ? classColours[detail.classId] : undefined;
 
   return (
-    <div className={styles.detail}>
+    <div className={edit ? `${styles.detail} ${styles.detailEditable}` : styles.detail}>
       <h1 className={styles.detailTitle}>
         {detail.prefLabel || localName(detail.uri)}
         {edit && (
@@ -178,9 +243,9 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
         )}
       </h1>
 
-      <div className={styles.detailColumns}>
+      <div className={styles.detailColumns} ref={columnsRef}>
         {/* ---------------- Left: identity, labels, metadata ---------------- */}
-        <div className={styles.detailColumn}>
+        <div className={styles.detailColumn} style={{ flex: `0 1 calc(${split}% - 9px)` }}>
           <Section icon="Tag" title="Concept Class">
             {detail.className ? (
               <span className={styles.classChip} style={{ backgroundColor: colour || undefined }}>
@@ -240,6 +305,19 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
             ))}
           </Section>
         </div>
+
+        {/* Drag to trade space between the columns; arrows nudge it. */}
+        <button
+          type="button"
+          className={styles.detailSplitter}
+          aria-label="Resize columns (drag, or use arrow keys)"
+          title="Drag to resize"
+          onPointerDown={startSplitDrag}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') { e.preventDefault(); applySplit(split - 2); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); applySplit(split + 2); }
+          }}
+        />
 
         {/* ---------------- Right: position in the graph ---------------- */}
         <div className={styles.detailColumn}>

@@ -51,8 +51,10 @@ This page is the project-specific quickstart.
    asked once per browser session (it's sessionStorage), every time you
    open a fresh window.
 
-4. Work normally. Saving any `.ts`/`.tsx`/`.scss` file recompiles and the
-   page auto-refreshes via LiveReload.
+4. Work normally. Saving any `.ts`/`.tsx`/`.scss` file recompiles in ~10s —
+   then **press F5 yourself**: LiveReload cannot reach a SharePoint-hosted
+   page, so nothing refreshes automatically. Note a refresh drops the
+   in-memory database — re-open the file afterwards.
 
 ## When it goes wrong
 

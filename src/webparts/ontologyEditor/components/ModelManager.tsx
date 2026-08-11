@@ -1,7 +1,8 @@
 import * as React from 'react';
 import {
   DefaultButton, PrimaryButton, TextField, Dropdown, IDropdownOption,
-  Dialog, DialogType, DialogFooter, MessageBar, MessageBarType, IconButton
+  Dialog, DialogType, DialogFooter, MessageBar, MessageBarType,
+  SearchBox, Icon
 } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
@@ -232,8 +233,93 @@ const EditPropertyDialog: React.FC<{
   );
 };
 
+/**
+ * Card section matching the concept pane's visual language: tinted header
+ * band (chevron, icon, title, count chip, docked +), with the section's
+ * blurb, filter box and table inside. The band toggles the fold.
+ */
+const ModelSection: React.FC<{
+  domId: string;
+  icon: string;
+  title: string;
+  count: string;
+  addLabel: string;
+  onAdd: () => void;
+  filterValue: string;
+  onFilterChange: (v: string) => void;
+  filterPlaceholder: string;
+  blurb: string;
+  open: boolean;
+  onToggle: () => void;
+  children?: React.ReactNode;
+}> = (p) => (
+  <section className={styles.detailSection} id={p.domId}>
+    <h3
+      className={`${styles.detailSectionHeading} ${styles.modelSectionToggle}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={p.open}
+      onClick={p.onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onToggle(); }
+      }}
+    >
+      <Icon iconName={p.open ? 'ChevronDown' : 'ChevronRight'} className={styles.detailSectionChevron} />
+      <Icon iconName={p.icon} className={styles.detailSectionIcon} />
+      {p.title}
+      <span className={styles.countChip}>{p.count}</span>
+      <button
+        type="button"
+        className={styles.rowActionAdd}
+        title={p.addLabel}
+        aria-label={p.addLabel}
+        onClick={(e) => { e.stopPropagation(); p.onAdd(); }}
+      >
+        <Icon iconName="Add" />
+      </button>
+    </h3>
+    {p.open && (
+      <div className={styles.detailSectionBody}>
+        <p className={styles.muted}>{p.blurb}</p>
+        <div className={styles.modelSectionFilter}>
+          <SearchBox
+            placeholder={p.filterPlaceholder}
+            value={p.filterValue}
+            onChange={(_, v) => p.onFilterChange(v || '')}
+          />
+        </div>
+        {p.children}
+      </div>
+    )}
+  </section>
+);
+
+const MODEL_SECTIONS_KEY = 'ontologyEditor.modelSections';
+
 const ModelManager: React.FC<IModelManagerProps> = (props) => {
   const { db, writer, mutate, mutateError, onClearError, refreshToken } = props;
+
+  // Which sections are unfolded — remembered per browser.
+  const [openSections, setOpenSections] = React.useState<{ [id: string]: boolean }>(() => {
+    const all = { classes: true, types: true, fields: true, labeltypes: true };
+    try { return { ...all, ...JSON.parse(window.localStorage.getItem(MODEL_SECTIONS_KEY) || '{}') }; }
+    catch { return all; }
+  });
+  const setSection = (id: string, open: boolean): void => {
+    setOpenSections(prev => {
+      const next = { ...prev, [id]: open };
+      try { window.localStorage.setItem(MODEL_SECTIONS_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+      return next;
+    });
+  };
+  const jumpTo = (id: string): void => {
+    setSection(id, true);
+    // Let the section render open before scrolling to it.
+    setTimeout(() => {
+      const el = document.getElementById(`model-${id}`);
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
 
   const [dialog, setDialog] = React.useState<ModelDialog>({ kind: 'none' });
   const close = (): void => { setDialog({ kind: 'none' }); onClearError(); };
@@ -267,22 +353,71 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
     [properties]
   );
 
+  // Per-section filters — 108 classes and 72 relationship pairs are too many
+  // to scan by eye.
+  const [classFilter, setClassFilter] = React.useState('');
+  const [propFilter, setPropFilter] = React.useState('');
+  const [fieldFilter, setFieldFilter] = React.useState('');
+  const [labelTypeFilter, setLabelTypeFilter] = React.useState('');
+  const has = (needle: string, ...hay: Array<string | undefined>): boolean =>
+    hay.some(h => !!h && h.toLowerCase().indexOf(needle) >= 0);
+
+  const shownClasses = React.useMemo(() => {
+    const n = classFilter.trim().toLowerCase();
+    if (!n) return classes;
+    return classes.filter(c => has(n, c.label, c.definition,
+      c.parentClassId !== undefined ? className(c.parentClassId) : undefined));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classes, classFilter, classById]);
+
+  const shownPairs = React.useMemo(() => {
+    const n = propFilter.trim().toLowerCase();
+    if (!n) return pairRows;
+    return pairRows.filter(p => {
+      const inv = p.inversePropertyId !== undefined ? propById[p.inversePropertyId] : undefined;
+      return has(n, p.label, inv && inv.label, p.definition,
+        className(p.domainClassId), className(p.rangeClassId));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairRows, propFilter, propById, classById]);
+
+  const shownFields = React.useMemo(() => {
+    const n = fieldFilter.trim().toLowerCase();
+    if (!n) return metadataFields;
+    return metadataFields.filter(f => has(n, f.label, f.definition, f.domainClassName));
+  }, [metadataFields, fieldFilter]);
+
+  const shownLabelTypes = React.useMemo(() => {
+    const n = labelTypeFilter.trim().toLowerCase();
+    if (!n) return labelTypes;
+    return labelTypes.filter(t => has(n, t.label, t.definition, t.domainClassName));
+  }, [labelTypes, labelTypeFilter]);
+
+  const countText = (shown: number, total: number): string =>
+    shown === total ? String(total) : `${shown} of ${total}`;
+
   return (
     <div className={styles.modelManager}>
-      <section>
-        <div className={styles.modelSectionHeader}>
-          <h3>Concept classes ({classes.length})</h3>
-          <DefaultButton
-            text="New class" iconProps={{ iconName: 'Add' }}
-            onClick={() => setDialog({ kind: 'newClass' })}
-          />
-        </div>
-        <p className={styles.muted}>
-          What kind of thing a concept is. Classes govern which relationship
-          types a concept may use; the hierarchy below is between classes
-          (subclasses inherit their parent&apos;s relationship types) and is separate
-          from the concept tree.
-        </p>
+      {/* Everything below is long tables — one row of pills to get anywhere. */}
+      <div className={styles.modelJumpBar}>
+        <span className={styles.muted}>Jump to:</span>
+        <button type="button" className={styles.jumpPill} onClick={() => jumpTo('classes')}>Concept classes</button>
+        <button type="button" className={styles.jumpPill} onClick={() => jumpTo('types')}>Relationship types</button>
+        <button type="button" className={styles.jumpPill} onClick={() => jumpTo('fields')}>Metadata fields</button>
+        <button type="button" className={styles.jumpPill} onClick={() => jumpTo('labeltypes')}>Label types</button>
+      </div>
+
+      <ModelSection
+        domId="model-classes" icon="Tag" title="Concept classes"
+        count={countText(shownClasses.length, classes.length)}
+        addLabel="New class" onAdd={() => setDialog({ kind: 'newClass' })}
+        filterValue={classFilter} onFilterChange={setClassFilter}
+        filterPlaceholder="Filter classes…"
+        blurb={'What kind of thing a concept is. Classes govern which relationship types a concept may use; ' +
+          'the hierarchy below is between classes (subclasses inherit their parent’s relationship types) ' +
+          'and is separate from the concept tree.'}
+        open={!!openSections.classes} onToggle={() => setSection('classes', !openSections.classes)}
+      >
         {classes.length === 0 ? (
           <MessageBar>No classes yet. Create classes first — they become the domain and range choices when relationship types are defined.</MessageBar>
         ) : (
@@ -291,7 +426,7 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
               <tr><th /><th>Name</th><th>Parent</th><th>Concepts</th><th>Definition</th><th /></tr>
             </thead>
             <tbody>
-              {classes.map(c => {
+              {shownClasses.map(c => {
                 const colour = db.getClassColour(c);
                 return (
                   <tr key={c.id}>
@@ -308,14 +443,8 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
                       {(c.definition || '').replace(/<[^>]+>/g, '').slice(0, 80)}
                     </td>
                     <td>
-                      <IconButton
-                        iconProps={{ iconName: 'Edit' }} title="Edit"
-                        onClick={() => setDialog({ kind: 'editClass', cls: c })}
-                      />
-                      <IconButton
-                        iconProps={{ iconName: 'Delete' }} title="Delete"
-                        onClick={() => { if (mutate(() => writer.deleteClass(c.id))) close(); }}
-                      />
+                      <button type="button" className={styles.rowActionEdit} title="Edit" aria-label="Edit" onClick={() => setDialog({ kind: 'editClass', cls: c })}><Icon iconName="Edit" /></button>
+                      <button type="button" className={styles.rowActionDelete} title="Delete" aria-label="Delete" onClick={() => { if (mutate(() => writer.deleteClass(c.id))) close(); }}><Icon iconName="Delete" /></button>
                     </td>
                   </tr>
                 );
@@ -323,21 +452,18 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
             </tbody>
           </table>
         )}
-      </section>
+      </ModelSection>
 
-      <section>
-        <div className={styles.modelSectionHeader}>
-          <h3>Relationship types ({pairRows.length})</h3>
-          <DefaultButton
-            text="New relationship type" iconProps={{ iconName: 'Add' }}
-            onClick={() => setDialog({ kind: 'newProperty' })}
-          />
-        </div>
-        <p className={styles.muted}>
-          Each row is a pair: the relationship and its inverse are defined
-          together and every link is stored once, readable from both ends.
-          &quot;Uses&quot; counts stored links; a type in use cannot be deleted.
-        </p>
+      <ModelSection
+        domId="model-types" icon="Relationship" title="Relationship types"
+        count={countText(shownPairs.length, pairRows.length)}
+        addLabel="New relationship type" onAdd={() => setDialog({ kind: 'newProperty' })}
+        filterValue={propFilter} onFilterChange={setPropFilter}
+        filterPlaceholder="Filter relationship types…"
+        blurb={'Each row is a pair: the relationship and its inverse are defined together and every link ' +
+          'is stored once, readable from both ends. "Uses" counts stored links; a type in use cannot be deleted.'}
+        open={!!openSections.types} onToggle={() => setSection('types', !openSections.types)}
+      >
         {pairRows.length === 0 ? (
           <MessageBar>No relationship types yet. Define the types before linking concepts.</MessageBar>
         ) : (
@@ -346,7 +472,7 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
               <tr><th>Name</th><th>Inverse</th><th>From</th><th>To</th><th>Uses</th><th>Definition</th><th /></tr>
             </thead>
             <tbody>
-              {pairRows.map(p => {
+              {shownPairs.map(p => {
                 const inv = p.inversePropertyId !== undefined ? propById[p.inversePropertyId] : undefined;
                 const uses = (usage[p.id] || 0) + (inv && inv.id !== p.id ? (usage[inv.id] || 0) : 0);
                 return (
@@ -358,14 +484,8 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
                     <td>{uses}</td>
                     <td className={styles.muted}>{(p.definition || '').slice(0, 60)}</td>
                     <td>
-                      <IconButton
-                        iconProps={{ iconName: 'Edit' }} title="Edit"
-                        onClick={() => setDialog({ kind: 'editProperty', prop: p })}
-                      />
-                      <IconButton
-                        iconProps={{ iconName: 'Delete' }} title="Delete"
-                        onClick={() => { if (mutate(() => writer.deletePropertyPair(p.id))) close(); }}
-                      />
+                      <button type="button" className={styles.rowActionEdit} title="Edit" aria-label="Edit" onClick={() => setDialog({ kind: 'editProperty', prop: p })}><Icon iconName="Edit" /></button>
+                      <button type="button" className={styles.rowActionDelete} title="Delete" aria-label="Delete" onClick={() => { if (mutate(() => writer.deletePropertyPair(p.id))) close(); }}><Icon iconName="Delete" /></button>
                     </td>
                   </tr>
                 );
@@ -373,22 +493,19 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
             </tbody>
           </table>
         )}
-      </section>
+      </ModelSection>
 
-      <section>
-        <div className={styles.modelSectionHeader}>
-          <h3>Metadata fields ({metadataFields.length})</h3>
-          <DefaultButton
-            text="New metadata field" iconProps={{ iconName: 'Add' }}
-            onClick={() => setDialog({ kind: 'newField' })}
-          />
-        </div>
-        <p className={styles.muted}>
-          The note fields concepts may carry (Semaphore&apos;s Resource Metadata) —
-          defined once here so every value uses the same field, never invented
-          by typo on a concept. The standard SKOS notes (definition, scope
-          note, …) are always available without being defined.
-        </p>
+      <ModelSection
+        domId="model-fields" icon="PageList" title="Metadata fields"
+        count={countText(shownFields.length, metadataFields.length)}
+        addLabel="New metadata field" onAdd={() => setDialog({ kind: 'newField' })}
+        filterValue={fieldFilter} onFilterChange={setFieldFilter}
+        filterPlaceholder="Filter metadata fields…"
+        blurb={'The note fields concepts may carry (Semaphore’s Resource Metadata) — defined once here so ' +
+          'every value uses the same field, never invented by typo on a concept. The standard SKOS notes ' +
+          '(definition, scope note, …) are always available without being defined.'}
+        open={!!openSections.fields} onToggle={() => setSection('fields', !openSections.fields)}
+      >
         {metadataFields.length === 0 ? (
           <MessageBar>No custom metadata fields. Concepts still get the standard SKOS notes.</MessageBar>
         ) : (
@@ -397,42 +514,33 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
               <tr><th>Name</th><th>Applies to</th><th>Uses</th><th>Definition</th><th /></tr>
             </thead>
             <tbody>
-              {metadataFields.map(f => (
+              {shownFields.map(f => (
                 <tr key={f.id}>
                   <td>{f.label || '(system)'}</td>
                   <td>{f.domainClassName || 'Any'}</td>
                   <td>{f.uses}</td>
                   <td className={styles.muted}>{(f.definition || '').slice(0, 60)}</td>
                   <td>
-                    <IconButton
-                      iconProps={{ iconName: 'Edit' }} title="Edit"
-                      onClick={() => setDialog({ kind: 'editField', def: f })}
-                    />
-                    <IconButton
-                      iconProps={{ iconName: 'Delete' }} title="Delete"
-                      onClick={() => { if (mutate(() => writer.deleteMetadataField(f.id))) close(); }}
-                    />
+                    <button type="button" className={styles.rowActionEdit} title="Edit" aria-label="Edit" onClick={() => setDialog({ kind: 'editField', def: f })}><Icon iconName="Edit" /></button>
+                    <button type="button" className={styles.rowActionDelete} title="Delete" aria-label="Delete" onClick={() => { if (mutate(() => writer.deleteMetadataField(f.id))) close(); }}><Icon iconName="Delete" /></button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </section>
+      </ModelSection>
 
-      <section>
-        <div className={styles.modelSectionHeader}>
-          <h3>Label types ({labelTypes.length})</h3>
-          <DefaultButton
-            text="New label type" iconProps={{ iconName: 'Add' }}
-            onClick={() => setDialog({ kind: 'newLabelType' })}
-          />
-        </div>
-        <p className={styles.muted}>
-          The roles a label can play beyond preferred/alternative — Acronym,
-          Has code, Has evidence and so on. Defined here, then offered in the
-          label dialog on every concept.
-        </p>
+      <ModelSection
+        domId="model-labeltypes" icon="Dictionary" title="Label types"
+        count={countText(shownLabelTypes.length, labelTypes.length)}
+        addLabel="New label type" onAdd={() => setDialog({ kind: 'newLabelType' })}
+        filterValue={labelTypeFilter} onFilterChange={setLabelTypeFilter}
+        filterPlaceholder="Filter label types…"
+        blurb={'The roles a label can play beyond preferred/alternative — Acronym, Has code, Has evidence ' +
+          'and so on. Defined here, then offered in the label dialog on every concept.'}
+        open={!!openSections.labeltypes} onToggle={() => setSection('labeltypes', !openSections.labeltypes)}
+      >
         {labelTypes.length === 0 ? (
           <MessageBar>No label types. Labels can still be added as &quot;Alternative label&quot;.</MessageBar>
         ) : (
@@ -441,28 +549,22 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
               <tr><th>Name</th><th>Applies to</th><th>Uses</th><th>Definition</th><th /></tr>
             </thead>
             <tbody>
-              {labelTypes.map(t => (
+              {shownLabelTypes.map(t => (
                 <tr key={t.id}>
                   <td>{t.label || '(unnamed)'}</td>
                   <td>{t.domainClassName || 'Any'}</td>
                   <td>{t.uses}</td>
                   <td className={styles.muted}>{(t.definition || '').slice(0, 60)}</td>
                   <td>
-                    <IconButton
-                      iconProps={{ iconName: 'Edit' }} title="Edit"
-                      onClick={() => setDialog({ kind: 'editLabelType', def: t })}
-                    />
-                    <IconButton
-                      iconProps={{ iconName: 'Delete' }} title="Delete"
-                      onClick={() => { if (mutate(() => writer.deleteLabelType(t.id))) close(); }}
-                    />
+                    <button type="button" className={styles.rowActionEdit} title="Edit" aria-label="Edit" onClick={() => setDialog({ kind: 'editLabelType', def: t })}><Icon iconName="Edit" /></button>
+                    <button type="button" className={styles.rowActionDelete} title="Delete" aria-label="Delete" onClick={() => { if (mutate(() => writer.deleteLabelType(t.id))) close(); }}><Icon iconName="Delete" /></button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </section>
+      </ModelSection>
 
       {dialog.kind === 'newClass' && (
         <ClassDialog
