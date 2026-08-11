@@ -103,17 +103,33 @@ export class FileService {
   }
 
   /**
-   * Create a folder if it does not exist. AddUsingPath returns the existing
-   * folder rather than failing, so calling this before every write is safe.
-   * Only the LAST segment is created — the parent library must exist, which
-   * "Shared Documents" always does.
+   * Create a folder if it does not exist. Checked with a GET first because
+   * Folders/AddUsingPath is NOT idempotent — it returns HTTP 400 when the
+   * folder already exists (observed on SPO 2026-08; the first save worked,
+   * every later one failed). Only the LAST segment is created — the parent
+   * library must exist, which "Shared Documents" always does.
    */
   public async ensureFolder(serverRelativePath: string): Promise<void> {
-    const url =
+    const checkUrl =
+      `${this._webUrl}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
+      `${encodePath(odataLiteral(serverRelativePath))}')/Exists`;
+    try {
+      const check: SPHttpClientResponse = await this._context.spHttpClient.get(
+        checkUrl, SPHttpClient.configurations.v1
+      );
+      if (check.ok) {
+        const json = await check.json();
+        if (json && json.value === true) return;
+      }
+    } catch {
+      // Missing folder can surface as an error response — fall through to create.
+    }
+
+    const createUrl =
       `${this._webUrl}/_api/web/Folders/AddUsingPath(decodedurl='` +
       `${encodePath(odataLiteral(serverRelativePath))}')`;
     const response: SPHttpClientResponse = await this._context.spHttpClient.post(
-      url, SPHttpClient.configurations.v1, {}
+      createUrl, SPHttpClient.configurations.v1, {}
     );
     if (!response.ok) {
       throw new Error(`Could not create folder ${serverRelativePath} — HTTP ${response.status} ${response.statusText}`);
