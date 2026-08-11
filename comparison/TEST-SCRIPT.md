@@ -1,15 +1,19 @@
 # Editor test script — Model tab & building an ontology from scratch
 
-Version 0.3.0.0. Two parts: **A** exercises the new Model tab on the real IR
+Version 0.4.1.0. Two parts: **A** exercises the new Model tab on the real IR
 ontology; **B** builds a small ontology from nothing. Every step says what you
 should see — anything different is a bug, note it and carry on. The flow
 mirrors how the IR model itself is structured (classes with colours and a
 hierarchy, paired relationship types with domain/range, concepts with alt
 labels/acronyms, polyhierarchy, metadata), without trying to be exhaustive.
 
-Note: the change journal grew a new entry type, so **.sqlite files saved
-before 0.3.0.0 should be rebuilt from Turtle** (import the .ttl again) before
-editing classes in them.
+Notes:
+- The change journal grew a new entry type in 0.3.0.0, so **.sqlite files
+  saved before then must be rebuilt from Turtle** (import the .ttl again)
+  before editing classes in them.
+- Known gaps, on the list, not bugs: defining **metadata fields** and **label
+  types** at the model level isn't built yet — a scratch ontology offers the
+  standard SKOS note fields and the "Alternative label" role only.
 
 ---
 
@@ -69,7 +73,10 @@ must exist before concepts can be linked.
      sensibly before you hit Create (that's the domain/range talking).
 4. **Concepts.** Two different routes, depending on whether the concept has a
    parent:
-   - **Top-level** — the **New concept** button in the command bar. Create:
+   - **Top-level** — the empty tree shows a dashed **"+ Add the first
+     concept"** row; click it (afterwards it reads "+ New top concept" at the
+     bottom of the root level — the command-bar **New concept** button does
+     the same thing). Create:
      - `ACME Ltd` — class **Organisation**
      - `Tax filing` — class **Activity**
      - `Filing guide` — class **Document**
@@ -83,6 +90,12 @@ must exist before concepts can be linked.
      nested under Tax filing; class colours on the tree nodes.
    - (A third route if you forgot the parent: create top-level, then select
      the concept → **add broader** in the detail pane → pick the parent.)
+4b. **Change a class after the fact.** Select Annual return → in the detail
+   pane, click the pencil next to the class chip → change it to **Document**
+   → try Add relationship (*expect:* only **Mentions** offered now, not
+   Performs/Produces) → change the class back to **Activity**.
+   That's the class doing its actual job: it governs the relationship picker,
+   independent of where the concept sits in the tree.
 5. **Hierarchy, second parent (polyhierarchy).** Select Annual return → add
    broader → pick ACME Ltd (nonsense semantically, but it proves the
    mechanics).
@@ -100,10 +113,20 @@ must exist before concepts can be linked.
 7. **Labels with matching flags.** ACME Ltd → add an alternative label
    `ACME` → set Case sensitivity **Case sensitive**, Stemming **Off**.
    - *Expect:* flag chips/badges on the label like the IR data shows.
-8. **Metadata.** ACME Ltd → add metadata → definition → "A test organisation."
-9. **Save .sqlite** → Open another… → reopen the saved file.
+8. **Metadata.** ACME Ltd → add metadata → the Field dropdown offers the
+   standard SKOS set (definition pre-selected, plus scope note, editorial
+   note, history note, example, comment) → definition → "A test organisation."
+   - Then hover the metadata row: a pencil edits the value in place, the bin
+     deletes it. Edit it to prove the round trip.
+9. **Save to SharePoint** (command bar) → *expect:* no setup needed — it
+   creates `Shared Documents/Ontology` on the site and writes
+   `ontology.sqlite` there; the unsaved-changes counter on "Save .sqlite"
+   resets. Then **Open another…** → *expect:* the picker auto-lists that
+   folder with your file in it → open it.
    - *Expect:* all of it back — including a delete test: deleting Tax filing
      should warn it takes 1 child + 2 relationships with it. Cancel.
+   - ("Save .sqlite" still downloads a local copy — same data, your choice
+     of destination.)
 10. **The proof.** Keep the saved `.sqlite` — the same flow runs headless as
     `npm --prefix tools run smoke`, and a Turtle export of exactly this
     shape re-parses with zero anomalies (verified in CI-style by the smoke
@@ -113,9 +136,10 @@ must exist before concepts can be linked.
 ## What this deliberately covers from the IR model
 
 class hierarchy + colours (§B2) · paired types with domain/range (§B3) ·
-subclass inheritance in the picker (§B6) · "Any" ranges (§B6) · one-row
-both-ends links (§B6) · polyhierarchy (§B5) · alt labels with matching flags
-(§B7) · annotations (§B8) · guarded deletes (§A5, §B9) · save/reload (§A7,
-§B9). Not covered on purpose: SKOS-XL label URIs per language, wildcard
-patterns, field-code rules — those exist in the import path and round-trip
-already.
+class vs tree-position independence (§B4b) · subclass inheritance in the
+picker (§B6) · "Any" ranges (§B6) · one-row both-ends links (§B6) ·
+polyhierarchy (§B5) · alt labels with matching flags (§B7) · annotations,
+including edit-in-place (§B8) · guarded deletes (§A5, §B9) · save to
+SharePoint and reload (§B9). Not covered on purpose: SKOS-XL label URIs per
+language, wildcard patterns, field-code rules — those exist in the import
+path and round-trip already.
