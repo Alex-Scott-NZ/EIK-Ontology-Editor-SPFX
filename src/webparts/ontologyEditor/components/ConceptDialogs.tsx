@@ -77,6 +77,59 @@ export const NewConceptDialog: React.FC<INewConceptDialogProps> = (props) => {
   );
 };
 
+/* ------------------------------------------------------------ save as -- */
+
+export const SaveAsDialog: React.FC<{
+  initialName: string;
+  /** Hidden when there is no SharePoint context (e.g. local workbench). */
+  canSaveToSharePoint: boolean;
+  folderPath?: string;
+  onDownload: (fileName: string) => void;
+  onSaveToSharePoint: (fileName: string) => void;
+  onCancel: () => void;
+}> = ({ initialName, canSaveToSharePoint, folderPath, onDownload, onSaveToSharePoint, onCancel }) => {
+  const [name, setName] = React.useState(initialName);
+  const cleaned = (): string => {
+    const n = name.trim().replace(/[\\/:*?"<>|]/g, '-');
+    return /\.sqlite$/i.test(n) ? n : `${n}.sqlite`;
+  };
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: 'Save as…',
+        subText: canSaveToSharePoint && folderPath
+          ? `SharePoint saves go to ${folderPath}. Later quick-saves reuse this name.`
+          : 'Later quick-saves reuse this name.'
+      }}
+      modalProps={{ isBlocking: true }}
+      minWidth={480}
+    >
+      <TextField
+        label="File name" required autoFocus
+        value={name}
+        onChange={(_, v) => setName(v || '')}
+        description=".sqlite is added automatically"
+      />
+      <DialogFooter>
+        {canSaveToSharePoint && (
+          <PrimaryButton
+            text="Save to SharePoint" disabled={!name.trim()}
+            onClick={() => onSaveToSharePoint(cleaned())}
+          />
+        )}
+        <DefaultButton
+          text="Download" disabled={!name.trim()}
+          onClick={() => onDownload(cleaned())}
+        />
+        <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
 /* ------------------------------------------------------- change class -- */
 
 export const ChangeClassDialog: React.FC<{

@@ -183,11 +183,13 @@ const SourcePicker: React.FC<ISourcePickerProps> = (props) => {
                 <tr><th>Name</th><th>Size</th><th>Modified</th><th /></tr>
               </thead>
               <tbody>
-                {files.map(f => (
+                {[...files]
+                  .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
+                  .map(f => (
                   <tr key={f.serverRelativeUrl}>
                     <td>{f.name}</td>
                     <td>{formatSize(f.size)}</td>
-                    <td>{new Date(f.modified).toLocaleDateString()}</td>
+                    <td>{new Date(f.modified).toLocaleString()}</td>
                     <td>
                       <DefaultButton
                         text={isTurtle(f.name) ? 'Import' : 'Open'}

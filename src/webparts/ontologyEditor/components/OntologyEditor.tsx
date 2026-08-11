@@ -25,7 +25,8 @@ import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../
 import { IConceptEditHandlers } from './ConceptDetail';
 import {
   NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
-  RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog, ChangeClassDialog
+  RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog, ChangeClassDialog,
+  SaveAsDialog
 } from './ConceptDialogs';
 import { localName } from '../../../services/turtle/Vocabulary';
 
@@ -44,6 +45,7 @@ type DialogState =
   | { kind: 'addAnnotation' }
   | { kind: 'editAnnotation'; annotation: IAnnotation }
   | { kind: 'confirmDelete'; node: ITreeNode; impact: string }
+  | { kind: 'saveAs' }
   | { kind: 'confirm'; title: string; message: string; act: () => void };
 
 type Stage = 'choosing' | 'working' | 'ready';
@@ -84,6 +86,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [selectedId, setSelectedId] = React.useState<number | undefined>(undefined);
   const [revealPath, setRevealPath] = React.useState<number[] | undefined>(undefined);
   const [sourceLabel, setSourceLabel] = React.useState<string>('');
+  const [fileName, setFileName] = React.useState<string>('ontology.sqlite');
 
   const [writer, setWriter] = React.useState<OntologyWriter | undefined>(undefined);
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
@@ -117,6 +120,12 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     setClassColours(database.getClassColourMap());
     setClassLabels(database.getClassLabelMap());
     setSourceLabel(label);
+    // Derive the save name from the source: ontology.ttl -> ontology.sqlite,
+    // an opened .sqlite keeps its own name, anything else gets the default.
+    const base = label.split('/').pop() || '';
+    if (/\.sqlite$/i.test(base)) setFileName(base);
+    else if (/\.ttl$/i.test(base)) setFileName(base.replace(/\.ttl$/i, '.sqlite'));
+    else setFileName('ontology.sqlite');
     setSelectedId(undefined);
     // A reopened database carries its journal (the audit trail); everything in
     // it was saved by definition, so the unsaved baseline starts there.
@@ -230,26 +239,28 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
   // -- Actions ---------------------------------------------------------------
 
-  const saveLocally = React.useCallback((): void => {
+  const saveLocally = React.useCallback((name?: string): void => {
     if (!db) return;
-    downloadBytes(db.export(), 'ontology.sqlite');
+    if (name) setFileName(name);
+    downloadBytes(db.export(), name || fileName);
     if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
-  }, [db, writer]);
+  }, [db, writer, fileName]);
 
-  const saveToLibrary = React.useCallback(async (): Promise<void> => {
+  const saveToLibrary = React.useCallback(async (name?: string): Promise<void> => {
     if (!db || !fileService || !effectiveFolder) return;
+    if (name) setFileName(name);
     setProgress('Uploading to SharePoint…');
     setStage('working');
     try {
       await fileService.ensureFolder(effectiveFolder);
-      await fileService.writeFile(effectiveFolder, 'ontology.sqlite', db.export());
+      await fileService.writeFile(effectiveFolder, name || fileName, db.export());
       if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
       setStage('ready');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage('ready');
     }
-  }, [db, fileService, effectiveFolder, writer]);
+  }, [db, fileService, effectiveFolder, writer, fileName]);
 
   const onSearch = React.useCallback((term: string): void => {
     setSearch(term);
@@ -344,14 +355,19 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       text: (pendingChanges - savedChanges) > 0
         ? `Save .sqlite (${pendingChanges - savedChanges} unsaved)`
         : 'Save .sqlite',
+      title: `Downloads ${fileName}`,
       iconProps: { iconName: 'Download' },
       onClick: () => { saveLocally(); }
     },
     ...(fileService ? [{
       key: 'upload', text: 'Save to SharePoint', iconProps: { iconName: 'CloudUpload' },
-      title: `Saves ontology.sqlite to ${effectiveFolder}`,
+      title: `Saves ${fileName} to ${effectiveFolder}`,
       onClick: () => { void saveToLibrary(); }
     }] : []),
+    {
+      key: 'saveAs', text: 'Save as…', iconProps: { iconName: 'SaveAs' },
+      onClick: () => { setDialog({ kind: 'saveAs' }); }
+    },
     {
       key: 'switch', text: 'Open another…', iconProps: { iconName: 'OpenFolderHorizontal' },
       onClick: () => { setStage('choosing'); setError(undefined); }
@@ -528,6 +544,18 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
           />
         );
       }
+
+      case 'saveAs':
+        return (
+          <SaveAsDialog
+            initialName={fileName}
+            canSaveToSharePoint={!!fileService}
+            folderPath={effectiveFolder || undefined}
+            onCancel={closeDialog}
+            onDownload={(name) => { saveLocally(name); closeDialog(); }}
+            onSaveToSharePoint={(name) => { closeDialog(); void saveToLibrary(name); }}
+          />
+        );
 
       case 'changeClass': {
         const current = db.getConcept(selectedId as number);
