@@ -44,6 +44,13 @@ export class OntologyDatabase {
 
   private constructor(db: Database) {
     this._db = db;
+    // MUST be re-asserted on every connection. `PRAGMA foreign_keys` is a
+    // connection setting, not a property of the file — SQLite defaults it OFF,
+    // so the ON in schema.sql applies only to the connection that ran it.
+    // Reopening a saved database without this silently disables every
+    // ON DELETE CASCADE, and deleting a concept would strand its labels,
+    // annotations, relationships and hierarchy edges.
+    db.run('PRAGMA foreign_keys = ON');
   }
 
   /**

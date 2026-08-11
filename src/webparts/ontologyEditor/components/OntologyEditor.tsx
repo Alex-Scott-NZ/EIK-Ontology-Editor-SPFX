@@ -16,11 +16,33 @@ import ConceptList from './ConceptList';
 import ConceptDetailPane from './ConceptDetail';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
+import { OntologyWriter, ValidationFailure, ILabelFlagEdit } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
 import {
   FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes
 } from '../../../services/sharepoint/FileService';
-import { IOntologyStats } from '../../../models/IOntology';
+import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../../models/IOntology';
+import { IConceptEditHandlers } from './ConceptDetail';
+import {
+  NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
+  RenamePrompt, PropertyPicker, ConfirmDialog
+} from './ConceptDialogs';
+import { localName } from '../../../services/turtle/Vocabulary';
+
+/** Which modal is open, and what it is operating on. */
+type DialogState =
+  | { kind: 'none' }
+  | { kind: 'newConcept'; parent?: IConcept }
+  | { kind: 'rename' }
+  | { kind: 'addLabel' }
+  | { kind: 'editLabel'; label: ILabel }
+  | { kind: 'pickRelationshipProperty' }
+  | { kind: 'pickRelationshipTarget'; propertyId: number; propertyLabel: string }
+  | { kind: 'pickBroader' }
+  | { kind: 'addAnnotation' }
+  | { kind: 'editAnnotation'; annotation: IAnnotation }
+  | { kind: 'confirmDelete'; node: ITreeNode; impact: string }
+  | { kind: 'confirm'; title: string; message: string; act: () => void };
 
 type Stage = 'choosing' | 'working' | 'ready';
 type ViewMode = 'tree' | 'list';
@@ -61,6 +83,13 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [revealPath, setRevealPath] = React.useState<number[] | undefined>(undefined);
   const [sourceLabel, setSourceLabel] = React.useState<string>('');
 
+  const [writer, setWriter] = React.useState<OntologyWriter | undefined>(undefined);
+  const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
+  const [dialogError, setDialogError] = React.useState<string | undefined>(undefined);
+  // Views memoise their queries; bumping this refetches after a mutation.
+  const [refreshToken, setRefreshToken] = React.useState<number>(0);
+  const [pendingChanges, setPendingChanges] = React.useState<number>(0);
+
   const fileService = React.useMemo(
     () => (context ? new FileService(context) : undefined), [context]
   );
@@ -76,13 +105,40 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
   const adopt = React.useCallback((database: OntologyDatabase, label: string): void => {
     setDb(database);
+    setWriter(new OntologyWriter(
+      database.raw,
+      (context && context.pageContext.user && context.pageContext.user.email) || 'unknown'
+    ));
     setStats(database.getStats());
     setClassColours(database.getClassColourMap());
     setClassLabels(database.getClassLabelMap());
     setSourceLabel(label);
     setSelectedId(undefined);
+    setPendingChanges(0);
+    setRefreshToken(t => t + 1);
     setStage('ready');
-  }, []);
+  }, [context]);
+
+  /**
+   * Run a mutation, refresh the views, and surface validation failures in the
+   * dialog rather than as an unexplained no-op.
+   * Returns true when the mutation succeeded.
+   */
+  const mutate = React.useCallback((fn: () => void): boolean => {
+    if (!writer || !db) return false;
+    try {
+      setDialogError(undefined);
+      fn();
+      setStats(db.getStats());
+      setPendingChanges(writer.getChangeCount());
+      setRefreshToken(t => t + 1);
+      return true;
+    } catch (e) {
+      if (e instanceof ValidationFailure) setDialogError(e.message);
+      else setDialogError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  }, [writer, db]);
 
   // -- Loading paths ---------------------------------------------------------
 
@@ -190,9 +246,84 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     }
   }, [db, view]);
 
+  // -- editing ---------------------------------------------------------------
+
+  const closeDialog = React.useCallback((): void => {
+    setDialog({ kind: 'none' });
+    setDialogError(undefined);
+  }, []);
+
+  const editHandlers: IConceptEditHandlers | undefined = React.useMemo(() => {
+    if (!db || !writer || selectedId === undefined) return undefined;
+    return {
+      onRename: () => setDialog({ kind: 'rename' }),
+      onAddLabel: () => setDialog({ kind: 'addLabel' }),
+      onEditLabel: (label) => setDialog({ kind: 'editLabel', label }),
+      onDeleteLabel: (label) => setDialog({
+        kind: 'confirm',
+        title: 'Delete label',
+        message: `Delete "${label.literalForm}"? Any matching settings on it go too.`,
+        act: () => { if (mutate(() => writer.deleteLabel(label.id))) closeDialog(); }
+      }),
+      onAddRelationship: () => setDialog({ kind: 'pickRelationshipProperty' }),
+      onDeleteRelationship: (relationshipId, description) => setDialog({
+        kind: 'confirm',
+        title: 'Remove relationship',
+        message: `Remove ${description}? This removes it from both concepts, ` +
+                 `because the pair is stored once.`,
+        act: () => { if (mutate(() => writer.deleteRelationship(relationshipId))) closeDialog(); }
+      }),
+      onAddBroader: () => setDialog({ kind: 'pickBroader' }),
+      onRemoveBroader: (parentId, parentLabel) => setDialog({
+        kind: 'confirm',
+        title: 'Remove parent',
+        message: `Remove "${parentLabel}" as a parent? If it is the only one, ` +
+                 `this concept becomes a top concept.`,
+        act: () => { if (mutate(() => writer.removeBroader(selectedId, parentId))) closeDialog(); }
+      }),
+      onAddNarrower: () => {
+        const parent = db.getConcept(selectedId);
+        setDialog({ kind: 'newConcept', parent });
+      },
+      onAddAnnotation: () => setDialog({ kind: 'addAnnotation' }),
+      onEditAnnotation: (annotation) => setDialog({ kind: 'editAnnotation', annotation }),
+      onDeleteAnnotation: (annotation) => setDialog({
+        kind: 'confirm',
+        title: 'Delete metadata',
+        message: `Delete this ${localName(annotation.predicateUri)} value?`,
+        act: () => { if (mutate(() => writer.deleteAnnotation(annotation.id))) closeDialog(); }
+      })
+    };
+  }, [db, writer, selectedId, mutate, closeDialog]);
+
+  const onTreeAddChild = React.useCallback((parent: ITreeNode): void => {
+    setDialog({ kind: 'newConcept', parent });
+  }, []);
+
+  const onTreeDelete = React.useCallback((node: ITreeNode): void => {
+    if (!writer) return;
+    const i = writer.describeDeleteImpact(node.id);
+    const parts: string[] = [];
+    if (i.children) parts.push(`${i.children} child concept${i.children === 1 ? '' : 'ren'}`);
+    if (i.relationships) parts.push(`${i.relationships} relationship${i.relationships === 1 ? '' : 's'}`);
+    if (i.labels) parts.push(`${i.labels} label${i.labels === 1 ? '' : 's'}`);
+    if (i.annotations) parts.push(`${i.annotations} metadata field${i.annotations === 1 ? '' : 's'}`);
+    setDialog({
+      kind: 'confirmDelete',
+      node,
+      impact: parts.length ? parts.join(', ') : 'nothing else'
+    });
+  }, [writer]);
+
   const commands: ICommandBarItemProps[] = [
     {
-      key: 'download', text: 'Save .sqlite', iconProps: { iconName: 'Download' },
+      key: 'new', text: 'New concept', iconProps: { iconName: 'Add' },
+      onClick: () => { setDialog({ kind: 'newConcept', parent: undefined }); }
+    },
+    {
+      key: 'download',
+      text: pendingChanges > 0 ? `Save .sqlite (${pendingChanges} change${pendingChanges === 1 ? '' : 's'})` : 'Save .sqlite',
+      iconProps: { iconName: 'Download' },
       onClick: () => { saveLocally(); }
     },
     ...(fileService && libraryFolder ? [{
@@ -281,6 +412,9 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 revealPath={revealPath}
+                onAddChild={onTreeAddChild}
+                onDelete={onTreeDelete}
+                refreshToken={refreshToken}
               />
             ) : (
               <ConceptList
@@ -288,6 +422,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
                 search={search}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                refreshToken={refreshToken}
               />
             )}
           </div>
@@ -303,12 +438,191 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
               onNavigate={setSelectedId}
               classColours={classColours}
               classLabels={classLabels}
+              edit={editHandlers}
+              refreshToken={refreshToken}
             />
           )}
         </div>
       </div>
+
+      {renderDialog()}
     </div>
   );
+
+  function renderDialog(): JSX.Element | undefined {
+    if (!db || !writer || dialog.kind === 'none') return undefined;
+
+    switch (dialog.kind) {
+      case 'newConcept':
+        return (
+          <NewConceptDialog
+            db={db}
+            parent={dialog.parent}
+            error={dialogError}
+            onCancel={closeDialog}
+            onCreate={(label, classId) => {
+              let newId: number | undefined;
+              const ok = mutate(() => {
+                newId = writer.createConcept({
+                  prefLabel: label,
+                  classId,
+                  parentConceptId: dialog.parent ? dialog.parent.id : undefined
+                });
+              });
+              if (ok) {
+                closeDialog();
+                if (newId !== undefined) {
+                  setSelectedId(newId);
+                  if (dialog.parent) setRevealPath(db.getAncestorPath(newId));
+                }
+              }
+            }}
+          />
+        );
+
+      case 'rename': {
+        const current = db.getConcept(selectedId as number);
+        return (
+          <RenamePrompt
+            initial={current ? current.prefLabel || '' : ''}
+            error={dialogError}
+            onCancel={closeDialog}
+            onSave={(value) => {
+              if (mutate(() => writer.renameConcept(selectedId as number, value))) closeDialog();
+            }}
+          />
+        );
+      }
+
+      case 'addLabel':
+        return (
+          <LabelDialog
+            db={db}
+            error={dialogError}
+            onCancel={closeDialog}
+            onSave={(form, role, flags: ILabelFlagEdit) => {
+              const ok = mutate(() => writer.addLabel({
+                conceptId: selectedId as number, labelProperty: role, literalForm: form, flags
+              }));
+              if (ok) closeDialog();
+            }}
+          />
+        );
+
+      case 'editLabel':
+        return (
+          <LabelDialog
+            db={db}
+            label={dialog.label}
+            error={dialogError}
+            onCancel={closeDialog}
+            onSave={(form, _role, flags: ILabelFlagEdit) => {
+              if (mutate(() => writer.updateLabel(dialog.label.id, form, flags))) closeDialog();
+            }}
+          />
+        );
+
+      case 'pickRelationshipProperty': {
+        const allowed = db.getAllowedProperties(selectedId as number);
+        return (
+          <PropertyPicker
+            properties={allowed}
+            onCancel={closeDialog}
+            onPick={(propertyId, propertyLabel) =>
+              setDialog({ kind: 'pickRelationshipTarget', propertyId, propertyLabel })}
+          />
+        );
+      }
+
+      case 'pickRelationshipTarget':
+        return (
+          <ConceptPickerDialog
+            db={db}
+            title={`${dialog.propertyLabel} — choose the target`}
+            propertyId={dialog.propertyId}
+            excludeConceptId={selectedId}
+            onCancel={closeDialog}
+            onPick={(targetId) => {
+              const ok = mutate(() =>
+                writer.addRelationship(selectedId as number, dialog.propertyId, targetId));
+              if (ok) closeDialog();
+            }}
+          />
+        );
+
+      case 'pickBroader':
+        return (
+          <ConceptPickerDialog
+            db={db}
+            title="Choose a broader concept"
+            excludeConceptId={selectedId}
+            onCancel={closeDialog}
+            onPick={(parentId) => {
+              if (mutate(() => writer.addBroader(selectedId as number, parentId))) closeDialog();
+            }}
+          />
+        );
+
+      case 'addAnnotation':
+        return (
+          <AnnotationDialog
+            db={db}
+            onCancel={closeDialog}
+            onSave={(pred, value) => {
+              if (mutate(() => writer.addAnnotation(selectedId as number, pred, value))) closeDialog();
+            }}
+          />
+        );
+
+      case 'editAnnotation':
+        return (
+          <AnnotationDialog
+            db={db}
+            predicateUri={dialog.annotation.predicateUri}
+            initialValue={dialog.annotation.value}
+            onCancel={closeDialog}
+            onSave={(_pred, value) => {
+              if (mutate(() => writer.updateAnnotation(dialog.annotation.id, value))) closeDialog();
+            }}
+          />
+        );
+
+      case 'confirmDelete':
+        return (
+          <ConfirmDialog
+            title={`Delete "${dialog.node.prefLabel}"`}
+            message={`This also deletes ${dialog.impact}. It cannot be undone from the UI, ` +
+                     `though the change is journalled.`}
+            confirmText="Delete"
+            danger
+            error={dialogError}
+            onCancel={closeDialog}
+            onConfirm={() => {
+              const ok = mutate(() => writer.deleteConcept(dialog.node.id));
+              if (ok) {
+                if (selectedId === dialog.node.id) setSelectedId(undefined);
+                closeDialog();
+              }
+            }}
+          />
+        );
+
+      case 'confirm':
+        return (
+          <ConfirmDialog
+            title={dialog.title}
+            message={dialog.message}
+            confirmText="Confirm"
+            error={dialogError}
+            onCancel={closeDialog}
+            onConfirm={dialog.act}
+          />
+        );
+
+      default:
+        return undefined;
+    }
+  }
 };
 
 export default OntologyEditor;

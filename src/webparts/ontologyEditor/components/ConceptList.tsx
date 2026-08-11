@@ -8,6 +8,8 @@ export interface IConceptListProps {
   search: string;
   selectedId?: number;
   onSelect: (conceptId: number) => void;
+  /** Bump to refetch after an edit. */
+  refreshToken?: number;
 }
 
 const PAGE_SIZE = 100;
@@ -35,10 +37,10 @@ function pageWindow(current: number, total: number): Array<number | '…'> {
  * Paged in SQL rather than by slicing a full result set: 10,788 rows would be
  * wasteful to fetch and render for one visible page.
  */
-const ConceptList: React.FC<IConceptListProps> = ({ db, search, selectedId, onSelect }) => {
+const ConceptList: React.FC<IConceptListProps> = ({ db, search, selectedId, onSelect, refreshToken }) => {
   const [page, setPage] = React.useState<number>(1);
 
-  const total = React.useMemo(() => db.countConcepts(search), [db, search]);
+  const total = React.useMemo(() => db.countConcepts(search), [db, search, refreshToken]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // A new search invalidates the current page number.
@@ -47,7 +49,7 @@ const ConceptList: React.FC<IConceptListProps> = ({ db, search, selectedId, onSe
   const safePage = Math.min(page, totalPages);
   const rows = React.useMemo(
     () => db.listConcepts((safePage - 1) * PAGE_SIZE, PAGE_SIZE, search),
-    [db, safePage, search]
+    [db, safePage, search, refreshToken]
   );
 
   return (
