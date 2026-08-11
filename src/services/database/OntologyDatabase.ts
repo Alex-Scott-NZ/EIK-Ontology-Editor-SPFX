@@ -90,6 +90,10 @@ export class OntologyDatabase {
     insPrefix.free();
     db.run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
       ['source_file', 'Created in the editor (blank ontology)']);
+    // New entities in a scratch ontology mint URIs here — NOT the
+    // InlandRevenueModel-editor namespace, which marks edits to the IR model.
+    db.run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
+      ['editor_namespace', 'http://example.com/new-ontology#']);
     return new OntologyDatabase(db);
   }
 

@@ -68,10 +68,21 @@ export class OntologyWriter {
   private _db: Database;
   private _author: string;
   private _dirty: boolean = false;
+  private _namespace: string;
 
   public constructor(db: Database, author: string) {
     this._db = db;
     this._author = author;
+    // Scratch ontologies carry their own namespace (set by createBlank);
+    // databases imported from the IR model fall back to the editor namespace
+    // so new entities stay visibly distinguishable from Semaphore's.
+    let ns: unknown;
+    try {
+      ns = this._one("SELECT value FROM import_metadata WHERE key = 'editor_namespace'");
+    } catch {
+      ns = undefined;
+    }
+    this._namespace = ns ? String(ns) : NEW_CONCEPT_NAMESPACE;
   }
 
   public get isDirty(): boolean {
@@ -227,7 +238,7 @@ export class OntologyWriter {
     if (errors.length) throw new ValidationFailure(errors);
 
     // Ensure the URI is unique even if two concepts slugify identically.
-    let uri = NEW_CONCEPT_NAMESPACE + slugify(label);
+    let uri = this._namespace + slugify(label);
     if (this._one('SELECT 1 FROM concepts WHERE uri = ?', [uri]) !== undefined) {
       uri = `${uri}-${uuid().slice(0, 8)}`;
     }
@@ -534,7 +545,7 @@ export class OntologyWriter {
       throw new ValidationFailure([{ field: 'label', message: `A class called "${label}" already exists.` }]);
     }
 
-    let uri = NEW_CONCEPT_NAMESPACE + slugify(label);
+    let uri = this._namespace + slugify(label);
     if (this._one('SELECT 1 FROM classes WHERE uri = ?', [uri]) !== undefined) {
       uri = `${uri}-${uuid().slice(0, 8)}`;
     }
@@ -674,7 +685,7 @@ export class OntologyWriter {
     const sub = options.subPropertyOf || 'http://www.w3.org/2004/02/skos/core#related';
 
     const insert = (lbl: string, domainId?: number, rangeId?: number): number => {
-      let uri = NEW_CONCEPT_NAMESPACE + slugify(lbl);
+      let uri = this._namespace + slugify(lbl);
       if (this._one('SELECT 1 FROM properties WHERE uri = ?', [uri]) !== undefined) {
         uri = `${uri}-${uuid().slice(0, 8)}`;
       }
@@ -819,7 +830,7 @@ export class OntologyWriter {
         field: 'label', message: `A field or type called "${label}" already exists.`
       }]);
     }
-    let uri = NEW_CONCEPT_NAMESPACE + slugify(label);
+    let uri = this._namespace + slugify(label);
     if (this._one('SELECT 1 FROM properties WHERE uri = ?', [uri]) !== undefined) {
       uri = `${uri}-${uuid().slice(0, 8)}`;
     }
