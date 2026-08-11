@@ -7,6 +7,7 @@ import { localName, SKOSXL_PREF_LABEL } from '../../../services/turtle/Vocabular
 
 export interface IConceptEditHandlers {
   onRename: () => void;
+  onChangeClass: () => void;
   onAddLabel: () => void;
   onEditLabel: (label: ILabel) => void;
   onDeleteLabel: (label: ILabel) => void;
@@ -181,6 +182,9 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
               <span className={styles.muted}>
                 No class — nothing constrains which relationships may be used here.
               </span>
+            )}
+            {edit && (
+              <RowAction icon="Edit" title="Change the class" onClick={edit.onChangeClass} />
             )}
           </Section>
 

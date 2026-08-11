@@ -77,6 +77,62 @@ export const NewConceptDialog: React.FC<INewConceptDialogProps> = (props) => {
   );
 };
 
+/* ------------------------------------------------------- change class -- */
+
+export const ChangeClassDialog: React.FC<{
+  db: OntologyDatabase;
+  conceptLabel: string;
+  currentClassId?: number;
+  error?: string;
+  onCancel: () => void;
+  onSave: (classId: number | undefined) => void;
+}> = ({ db, conceptLabel, currentClassId, error, onCancel, onSave }) => {
+  const [classId, setClassId] = React.useState<number | undefined>(currentClassId);
+
+  const options: IDropdownOption[] = React.useMemo(
+    () => [
+      { key: -1, text: '(no class)' },
+      ...db.getClasses().filter(c => !!c.label).map(c => ({ key: c.id, text: c.label as string }))
+    ],
+    [db]
+  );
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: `Change class of "${conceptLabel}"`,
+        subText: 'The class decides which relationship types this concept may take. ' +
+                 'Its position in the tree does not change.'
+      }}
+      modalProps={{ isBlocking: true }}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      <Dropdown
+        label="Concept class"
+        selectedKey={classId === undefined ? -1 : classId}
+        options={options}
+        onChange={(_, o) => setClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+      />
+      <MessageBar messageBarType={MessageBarType.info} isMultiline>
+        Existing relationships are kept even if the new class would not allow
+        creating them today — review them after changing.
+      </MessageBar>
+
+      <DialogFooter>
+        <PrimaryButton
+          text="Change" disabled={classId === currentClassId}
+          onClick={() => onSave(classId)}
+        />
+        <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
 /* --------------------------------------------------------------- picker -- */
 
 export interface IConceptPickerDialogProps {

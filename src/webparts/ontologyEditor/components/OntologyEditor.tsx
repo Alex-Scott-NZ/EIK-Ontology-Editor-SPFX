@@ -24,7 +24,7 @@ import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../
 import { IConceptEditHandlers } from './ConceptDetail';
 import {
   NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
-  RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog
+  RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog, ChangeClassDialog
 } from './ConceptDialogs';
 import { localName } from '../../../services/turtle/Vocabulary';
 
@@ -33,6 +33,7 @@ type DialogState =
   | { kind: 'none' }
   | { kind: 'newConcept'; parent?: IConcept }
   | { kind: 'rename' }
+  | { kind: 'changeClass' }
   | { kind: 'addLabel' }
   | { kind: 'editLabel'; label: ILabel }
   | { kind: 'pickRelationshipProperty' }
@@ -256,6 +257,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     if (!db || !writer || selectedId === undefined) return undefined;
     return {
       onRename: () => setDialog({ kind: 'rename' }),
+      onChangeClass: () => setDialog({ kind: 'changeClass' }),
       onAddLabel: () => setDialog({ kind: 'addLabel' }),
       onEditLabel: (label) => setDialog({ kind: 'editLabel', label }),
       onDeleteLabel: (label) => setDialog({
@@ -500,6 +502,22 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             onCancel={closeDialog}
             onSave={(value) => {
               if (mutate(() => writer.renameConcept(selectedId as number, value))) closeDialog();
+            }}
+          />
+        );
+      }
+
+      case 'changeClass': {
+        const current = db.getConcept(selectedId as number);
+        return (
+          <ChangeClassDialog
+            db={db}
+            conceptLabel={(current && current.prefLabel) || ''}
+            currentClassId={current ? current.classId : undefined}
+            error={dialogError}
+            onCancel={closeDialog}
+            onSave={(classId) => {
+              if (mutate(() => writer.setConceptClass(selectedId as number, classId))) closeDialog();
             }}
           />
         );

@@ -279,6 +279,13 @@ export class OntologyWriter {
   }
 
   public setConceptClass(conceptId: number, classId: number | undefined): void {
+    // Moving into a class must honour the same rule as being created in it:
+    // preferred labels are unique within a class.
+    const label = this._one('SELECT pref_label FROM concepts WHERE id = ?', [conceptId]);
+    if (label !== undefined && label !== null) {
+      const errors = this.checkLabelUniqueInClass(String(label), classId, conceptId);
+      if (errors.length) throw new ValidationFailure(errors);
+    }
     const before = this._one('SELECT class_id FROM concepts WHERE id = ?', [conceptId]);
     this._run('UPDATE concepts SET class_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [classId === undefined ? null : classId, conceptId]);
