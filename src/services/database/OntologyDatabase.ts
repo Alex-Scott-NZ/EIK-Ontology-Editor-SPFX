@@ -12,6 +12,7 @@
 
 import { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import { getSqlJs } from './sqlJsLoader';
+import { SCHEMA_SQL } from './schema';
 import {
   IConcept, IConceptDetail, IConceptLink, IAllowedProperty,
   ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats,
@@ -62,6 +63,33 @@ export class OntologyDatabase {
 
   /** Wrap a Database built in-process — e.g. the result of a Turtle import. */
   public static fromDatabase(db: Database): OntologyDatabase {
+    return new OntologyDatabase(db);
+  }
+
+  /**
+   * A brand-new, empty ontology: full schema, no content. Seeds the standard
+   * namespace prefixes (so a later Turtle export serialises readably) and a
+   * provenance marker; everything else — classes, relationship types,
+   * concepts — is authored in the editor.
+   */
+  public static async createBlank(): Promise<OntologyDatabase> {
+    const SQL: SqlJsStatic = await getSqlJs();
+    const db = new SQL.Database();
+    db.exec(SCHEMA_SQL);
+    const insPrefix = db.prepare('INSERT OR REPLACE INTO prefixes (prefix, uri) VALUES (?, ?)');
+    const prefixes: Array<[string, string]> = [
+      ['rdf', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'],
+      ['rdfs', 'http://www.w3.org/2000/01/rdf-schema#'],
+      ['owl', 'http://www.w3.org/2002/07/owl#'],
+      ['xsd', 'http://www.w3.org/2001/XMLSchema#'],
+      ['skos', 'http://www.w3.org/2004/02/skos/core#'],
+      ['skosxl', 'http://www.w3.org/2008/05/skos-xl#'],
+      ['sem', 'http://www.smartlogic.com/2014/08/semaphore-core#']
+    ];
+    for (const [p, uri] of prefixes) insPrefix.run([p, uri]);
+    insPrefix.free();
+    db.run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
+      ['source_file', 'Created in the editor (blank ontology)']);
     return new OntologyDatabase(db);
   }
 
@@ -406,6 +434,26 @@ export class OntologyDatabase {
       comment: str(r[8]),
       flags: parseFlags(r[9])
     }));
+  }
+
+  /** Stored-link count per relationship type (forward rows only, by design). */
+  public getPropertyUsage(): { [propertyId: number]: number } {
+    const out: { [propertyId: number]: number } = {};
+    for (const r of this._rows('SELECT property_id, COUNT(*) FROM relationships GROUP BY property_id')) {
+      out[Number(r[0])] = Number(r[1]);
+    }
+    return out;
+  }
+
+  /** Concept count per class, for the model screen and delete guards. */
+  public getClassConceptCounts(): { [classId: number]: number } {
+    const out: { [classId: number]: number } = {};
+    for (const r of this._rows(
+      'SELECT class_id, COUNT(*) FROM concepts WHERE class_id IS NOT NULL GROUP BY class_id'
+    )) {
+      out[Number(r[0])] = Number(r[1]);
+    }
+    return out;
   }
 
   /**

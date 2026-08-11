@@ -6,7 +6,7 @@ import {
 import styles from './OntologyEditor.module.scss';
 import { ILibraryFile } from '../../../services/sharepoint/FileService';
 
-export type SourceKind = 'turtle-local' | 'turtle-library' | 'sqlite-local' | 'sqlite-library';
+export type SourceKind = 'turtle-local' | 'turtle-library' | 'sqlite-local' | 'sqlite-library' | 'new';
 
 export interface ISourceChoice {
   kind: SourceKind;
@@ -122,6 +122,22 @@ const SourcePicker: React.FC<ISourcePickerProps> = (props) => {
             accept=".ttl,.turtle,text/turtle"
             style={{ display: 'none' }}
             onChange={() => pickLocal(ttlInput.current, 'turtle-local')}
+          />
+        </section>
+
+        {/* ---- Start from scratch ---- */}
+        <section className={styles.sourceCard}>
+          <h3>Start a new ontology</h3>
+          <p className={styles.muted}>
+            An empty model. Define classes and relationship types on the Model
+            tab, then add concepts. Save as <code>.sqlite</code> or export
+            Turtle when done.
+          </p>
+
+          <DefaultButton
+            text="Create a new ontology"
+            iconProps={{ iconName: 'PageAdd' }}
+            onClick={() => onChoose({ kind: 'new' })}
           />
         </section>
       </div>

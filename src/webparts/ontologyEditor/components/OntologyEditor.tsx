@@ -10,6 +10,7 @@ import { IOntologyEditorProps } from './IOntologyEditorProps';
 import SourcePicker, { ISourceChoice } from './SourcePicker';
 import ConceptTree from './ConceptTree';
 import ConceptList from './ConceptList';
+import ModelManager from './ModelManager';
 import ConceptDetailPane from './ConceptDetail';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
@@ -44,7 +45,7 @@ type DialogState =
   | { kind: 'confirm'; title: string; message: string; act: () => void };
 
 type Stage = 'choosing' | 'working' | 'ready';
-type ViewMode = 'tree' | 'list';
+type ViewMode = 'tree' | 'list' | 'model';
 
 /** Lets the browser repaint between import phases. */
 function yieldToBrowser(): Promise<void> {
@@ -120,6 +121,9 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       setDialogError(undefined);
       fn();
       setStats(db.getStats());
+      // Model-tab edits can add classes/colours the tree needs.
+      setClassColours(db.getClassColourMap());
+      setClassLabels(db.getClassLabelMap());
       setPendingChanges(writer.getChangeCount());
       setRefreshToken(t => t + 1);
       return true;
@@ -186,6 +190,11 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         const text = await fileService.readText(choice.path);
         await runImport(text, choice.path, text.length);
 
+      } else if (choice.kind === 'new') {
+        setProgress('Creating an empty ontology…');
+        await yieldToBrowser();
+        adopt(await OntologyDatabase.createBlank(), 'New ontology (unsaved)');
+
       } else {
         throw new Error('That source is not available in this context.');
       }
@@ -193,7 +202,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       setError(e instanceof Error ? e.message : String(e));
       setStage('choosing');
     }
-  }, [fileService, openSqlite, runImport]);
+  }, [fileService, openSqlite, runImport, adopt]);
 
   // Auto-open the configured database, so a page-embedded web part needs no clicks.
   const autoLoaded = React.useRef(false);
@@ -377,63 +386,75 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         </div>
       )}
 
-      <div className={styles.panes}>
-        <div className={styles.leftPane}>
-          <SearchBox
-            placeholder="Search concepts, acronyms, codes…"
-            value={search}
-            onChange={(_, v) => onSearch(v || '')}
-            onClear={() => onSearch('')}
-          />
+      <Pivot
+        selectedKey={view}
+        onLinkClick={item => setView((item && item.props.itemKey as ViewMode) || 'tree')}
+        className={styles.viewPivot}
+      >
+        <PivotItem headerText="Tree" itemKey="tree" itemIcon="BulletedTreeList" />
+        <PivotItem headerText="List" itemKey="list" itemIcon="BulletedList" />
+        <PivotItem headerText="Model" itemKey="model" itemIcon="Org" />
+      </Pivot>
 
-          <Pivot
-            selectedKey={view}
-            onLinkClick={item => setView((item && item.props.itemKey as ViewMode) || 'tree')}
-            className={styles.viewPivot}
-          >
-            <PivotItem headerText="Tree" itemKey="tree" itemIcon="BulletedTreeList" />
-            <PivotItem headerText="List" itemKey="list" itemIcon="BulletedList" />
-          </Pivot>
+      {view === 'model' && writer ? (
+        <ModelManager
+          db={db}
+          writer={writer}
+          mutate={mutate}
+          mutateError={dialogError}
+          onClearError={() => setDialogError(undefined)}
+          refreshToken={refreshToken}
+        />
+      ) : (
+        <div className={styles.panes}>
+          <div className={styles.leftPane}>
+            <SearchBox
+              placeholder="Search concepts, acronyms, codes…"
+              value={search}
+              onChange={(_, v) => onSearch(v || '')}
+              onClear={() => onSearch('')}
+            />
 
-          <div className={styles.leftPaneBody}>
-            {view === 'tree' ? (
-              <ConceptTree
-                db={db}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                revealPath={revealPath}
-                onAddChild={onTreeAddChild}
-                onDelete={onTreeDelete}
-                refreshToken={refreshToken}
-              />
+            <div className={styles.leftPaneBody}>
+              {view === 'tree' ? (
+                <ConceptTree
+                  db={db}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  revealPath={revealPath}
+                  onAddChild={onTreeAddChild}
+                  onDelete={onTreeDelete}
+                  refreshToken={refreshToken}
+                />
+              ) : (
+                <ConceptList
+                  db={db}
+                  search={search}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  refreshToken={refreshToken}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className={styles.rightPane}>
+            {selectedId === undefined ? (
+              <div className={styles.placeholder}>Please select a concept.</div>
             ) : (
-              <ConceptList
+              <ConceptDetailPane
                 db={db}
-                search={search}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
+                conceptId={selectedId}
+                onNavigate={setSelectedId}
+                classColours={classColours}
+                classLabels={classLabels}
+                edit={editHandlers}
                 refreshToken={refreshToken}
               />
             )}
           </div>
         </div>
-
-        <div className={styles.rightPane}>
-          {selectedId === undefined ? (
-            <div className={styles.placeholder}>Please select a concept.</div>
-          ) : (
-            <ConceptDetailPane
-              db={db}
-              conceptId={selectedId}
-              onNavigate={setSelectedId}
-              classColours={classColours}
-              classLabels={classLabels}
-              edit={editHandlers}
-              refreshToken={refreshToken}
-            />
-          )}
-        </div>
-      </div>
+      )}
 
       {renderDialog()}
     </div>

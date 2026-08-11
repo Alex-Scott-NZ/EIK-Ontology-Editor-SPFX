@@ -197,7 +197,9 @@ CREATE TABLE changes (
   changed_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   author      TEXT,
   op          TEXT NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
-  entity      TEXT NOT NULL CHECK (entity IN ('concept','relationship','label','annotation','broader')),
+  -- 'class' since 0.3 — databases saved before then must be rebuilt from
+  -- Turtle before class editing works (cheap: import takes ~4 s).
+  entity      TEXT NOT NULL CHECK (entity IN ('concept','relationship','label','annotation','broader','class')),
   entity_uri  TEXT,
   detail_json TEXT
 );

@@ -19,7 +19,7 @@
 import { Database } from 'sql.js';
 import {
   SKOSXL_PREF_LABEL, SKOS_BROADER, RDF_TYPE, RDFS_LABEL,
-  OWL_OBJECT_PROPERTY, SKOS_DEFINITION
+  OWL_OBJECT_PROPERTY, OWL_CLASS, SKOS_DEFINITION
 } from '../turtle/Vocabulary';
 
 /** Namespace for concepts created in this editor, so provenance stays visible. */
@@ -117,7 +117,7 @@ export class OntologyWriter {
   /** Record a change. Every public mutation calls this; nothing else may write. */
   private _journal(
     op: 'insert' | 'update' | 'delete',
-    entity: 'concept' | 'relationship' | 'label' | 'annotation' | 'broader',
+    entity: 'concept' | 'relationship' | 'label' | 'annotation' | 'broader' | 'class',
     entityUri: string | undefined,
     detail: unknown
   ): void {
@@ -506,6 +506,124 @@ export class OntologyWriter {
     return Object.keys(out).length ? JSON.stringify(out) : null;
   }
 
+  // -- classes (schema-level) ------------------------------------------------
+
+  /**
+   * Define a new concept class. A model-level change: the class becomes a
+   * choice on every concept and a valid domain/range for relationship types.
+   * The colour is Semaphore's tree swatch (sem:color), stored the way the
+   * importer stores it so export re-emits it identically.
+   */
+  public createClass(options: {
+    label: string;
+    parentClassId?: number;
+    /** `#rrggbb` or `rrggbb`. */
+    colour?: string;
+    definition?: string;
+  }): number {
+    const label = options.label.trim();
+    if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
+    if (this._one('SELECT 1 FROM classes WHERE label = ?', [label]) !== undefined) {
+      throw new ValidationFailure([{ field: 'label', message: `A class called "${label}" already exists.` }]);
+    }
+
+    let uri = NEW_CONCEPT_NAMESPACE + slugify(label);
+    if (this._one('SELECT 1 FROM classes WHERE uri = ?', [uri]) !== undefined) {
+      uri = `${uri}-${uuid().slice(0, 8)}`;
+    }
+    const colour = options.colour ? options.colour.replace(/^#/, '').toLowerCase() : undefined;
+
+    // The exporter replays rdf:type, rdfs:label, skos:definition and sem:color
+    // from flags_json — same invariant as createPropertyPair, see there.
+    const flags: { [k: string]: Array<{ v: string; t: string; lang?: string; dt?: string }> } = {
+      [RDF_TYPE]: [{ v: OWL_CLASS, t: 'i' }],
+      [RDFS_LABEL]: [{ v: label, t: 'l', lang: 'en' }]
+    };
+    if (options.definition) flags[SKOS_DEFINITION] = [{ v: options.definition, t: 'l', lang: 'en' }];
+    if (colour) flags[SEM + 'color'] = [{ v: colour, t: 'l', dt: 'http://www.w3.org/2001/XMLSchema#hexBinary' }];
+
+    this._run(
+      'INSERT INTO classes (uri, label, definition, parent_class_id, flags_json) VALUES (?, ?, ?, ?, ?)',
+      [uri, label, options.definition || null,
+       options.parentClassId === undefined ? null : options.parentClassId, JSON.stringify(flags)]
+    );
+    const id = this._lastId();
+    this._journal('insert', 'class', uri, {
+      label, parentClassId: options.parentClassId, colour, definition: options.definition
+    });
+    return id;
+  }
+
+  /** Rename a class or change its definition/colour. URI never changes. */
+  public updateClass(classId: number, changes: {
+    label?: string; definition?: string; colour?: string;
+  }): void {
+    const row = this._rows('SELECT uri, label, definition, flags_json FROM classes WHERE id = ?', [classId])[0];
+    if (!row) throw new ValidationFailure([{ field: 'class', message: 'That class no longer exists.' }]);
+    const [uri, oldLabel, oldDefinition, flagsJson] = [String(row[0]), row[1], row[2], row[3]];
+
+    const label = changes.label === undefined ? undefined : changes.label.trim();
+    if (label !== undefined) {
+      if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
+      const clash = this._one('SELECT 1 FROM classes WHERE label = ? AND id != ?', [label, classId]);
+      if (clash !== undefined) {
+        throw new ValidationFailure([{ field: 'label', message: `A class called "${label}" already exists.` }]);
+      }
+    }
+
+    // Patch the columns AND the flags terms the exporter replays.
+    let flags: { [k: string]: Array<{ v: string; t: string; lang?: string; dt?: string }> } = {};
+    try { flags = flagsJson ? JSON.parse(String(flagsJson)) : {}; } catch { flags = {}; }
+    if (label !== undefined) flags[RDFS_LABEL] = [{ v: label, t: 'l', lang: 'en' }];
+    if (changes.definition !== undefined) {
+      if (changes.definition) flags[SKOS_DEFINITION] = [{ v: changes.definition, t: 'l', lang: 'en' }];
+      else delete flags[SKOS_DEFINITION];
+    }
+    if (changes.colour !== undefined) {
+      const colour = changes.colour.replace(/^#/, '').toLowerCase();
+      if (colour) flags[SEM + 'color'] = [{ v: colour, t: 'l', dt: 'http://www.w3.org/2001/XMLSchema#hexBinary' }];
+      else delete flags[SEM + 'color'];
+    }
+
+    this._run(
+      'UPDATE classes SET label = COALESCE(?, label), definition = ?, flags_json = ? WHERE id = ?',
+      [label === undefined ? null : label,
+       changes.definition === undefined ? (oldDefinition === undefined ? null : oldDefinition) : (changes.definition || null),
+       JSON.stringify(flags), classId]
+    );
+    this._journal('update', 'class', uri, {
+      before: { label: oldLabel, definition: oldDefinition }, after: changes
+    });
+  }
+
+  /**
+   * Delete a class. Refused while anything references it — silently nulling
+   * concepts' classes (which the FK would do) loses information.
+   */
+  public deleteClass(classId: number): void {
+    const row = this._rows('SELECT uri, label FROM classes WHERE id = ?', [classId])[0];
+    if (!row) return;
+    const n = (sql: string, p: unknown[]): number => Number(this._one(sql, p) || 0);
+    const concepts = n('SELECT COUNT(*) FROM concepts WHERE class_id = ?', [classId]);
+    const children = n('SELECT COUNT(*) FROM classes WHERE parent_class_id = ?', [classId]);
+    const properties = n(
+      'SELECT COUNT(*) FROM properties WHERE domain_class_id = ? OR range_class_id = ?',
+      [classId, classId]
+    );
+    const blockers: string[] = [];
+    if (concepts) blockers.push(`${concepts} concept${concepts === 1 ? '' : 's'} of this class`);
+    if (children) blockers.push(`${children} subclass${children === 1 ? '' : 'es'}`);
+    if (properties) blockers.push(`${properties} relationship type${properties === 1 ? '' : 's'} using it as domain or range`);
+    if (blockers.length) {
+      throw new ValidationFailure([{
+        field: 'class',
+        message: `Cannot delete "${String(row[1])}" — still referenced by ${blockers.join(', ')}.`
+      }]);
+    }
+    this._run('DELETE FROM classes WHERE id = ?', [classId]);
+    this._journal('delete', 'class', String(row[0]), { label: row[1] });
+  }
+
   // -- relationship TYPES (schema-level) -------------------------------------
 
   /**
@@ -595,6 +713,84 @@ export class OntologyWriter {
     }
 
     return { propertyId, inversePropertyId };
+  }
+
+  /**
+   * Rename a relationship type or change its definition; optionally rename its
+   * inverse in the same call. Domain and range are deliberately NOT editable —
+   * changing them would silently invalidate existing links; delete and
+   * recreate instead if the constraint was wrong.
+   */
+  public updatePropertyPair(propertyId: number, changes: {
+    label?: string; inverseLabel?: string; definition?: string;
+  }): void {
+    const row = this._rows(
+      'SELECT uri, label, definition, inverse_property_id FROM properties WHERE id = ?', [propertyId]
+    )[0];
+    if (!row) throw new ValidationFailure([{ field: 'property', message: 'That relationship type no longer exists.' }]);
+    const inverseId = row[3] === null || row[3] === undefined ? undefined : Number(row[3]);
+
+    const apply = (id: number, uri: string, label?: string, definition?: string): void => {
+      if (label !== undefined) {
+        const trimmed = label.trim();
+        if (!trimmed) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
+        const clash = this._one('SELECT 1 FROM properties WHERE label = ? AND id != ?', [trimmed, id]);
+        if (clash !== undefined) {
+          throw new ValidationFailure([{ field: 'label', message: `A relationship type called "${trimmed}" already exists.` }]);
+        }
+      }
+      const fj = this._one('SELECT flags_json FROM properties WHERE id = ?', [id]);
+      let flags: { [k: string]: Array<{ v: string; t: string; lang?: string }> } = {};
+      try { flags = fj ? JSON.parse(String(fj)) : {}; } catch { flags = {}; }
+      if (label !== undefined) flags[RDFS_LABEL] = [{ v: label.trim(), t: 'l', lang: 'en' }];
+      if (definition !== undefined) {
+        if (definition) flags[SKOS_DEFINITION] = [{ v: definition, t: 'l', lang: 'en' }];
+        else delete flags[SKOS_DEFINITION];
+      }
+      this._run(
+        'UPDATE properties SET label = COALESCE(?, label), definition = COALESCE(?, definition), flags_json = ? WHERE id = ?',
+        [label === undefined ? null : label.trim(),
+         definition === undefined ? null : (definition || null), JSON.stringify(flags), id]
+      );
+      this._journal('update', 'relationship', uri, { kind: 'propertyDefinition', changes: { label, definition } });
+    };
+
+    apply(propertyId, String(row[0]), changes.label, changes.definition);
+    if (changes.inverseLabel !== undefined && inverseId !== undefined) {
+      const invUri = this._one('SELECT uri FROM properties WHERE id = ?', [inverseId]);
+      apply(inverseId, String(invUri), changes.inverseLabel, undefined);
+    }
+  }
+
+  /**
+   * Delete a relationship type and its inverse. Refused while any link uses
+   * either direction — those links would become undisplayable.
+   */
+  public deletePropertyPair(propertyId: number): void {
+    const row = this._rows(
+      'SELECT uri, label, inverse_property_id FROM properties WHERE id = ?', [propertyId]
+    )[0];
+    if (!row) return;
+    const inverseId = row[2] === null || row[2] === undefined ? undefined : Number(row[2]);
+
+    const ids = inverseId !== undefined && inverseId !== propertyId ? [propertyId, inverseId] : [propertyId];
+    const usage = Number(this._one(
+      `SELECT COUNT(*) FROM relationships WHERE property_id IN (${ids.map(() => '?').join(',')})`, ids
+    ) || 0);
+    if (usage) {
+      throw new ValidationFailure([{
+        field: 'property',
+        message: `Cannot delete "${String(row[1])}" — ${usage} relationship${usage === 1 ? '' : 's'} use it. Remove those first.`
+      }]);
+    }
+
+    for (const id of ids) {
+      const uri = this._one('SELECT uri FROM properties WHERE id = ?', [id]);
+      this._run('DELETE FROM properties WHERE id = ?', [id]);
+      this._journal('delete', 'relationship', uri === undefined ? undefined : String(uri), {
+        kind: 'propertyDefinition'
+      });
+    }
   }
 
   // -- annotations (metadata) ------------------------------------------------

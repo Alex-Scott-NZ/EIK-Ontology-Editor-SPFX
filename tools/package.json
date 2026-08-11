@@ -10,6 +10,7 @@
     "verify": "tsx verify-queries.ts",
     "audit": "tsx audit-coverage.ts",
     "compare": "tsx compare-extract.ts",
+    "smoke": "tsx scratch-smoke.ts",
     "export": "tsx export-ttl.ts",
     "roundtrip": "tsx roundtrip-diff.ts"
   },
