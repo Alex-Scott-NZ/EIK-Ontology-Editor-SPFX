@@ -2,5 +2,5 @@
   "$schema": "https://developer.microsoft.com/json-schemas/core-build/serve.schema.json",
   "port": 4321,
   "https": true,
-  "initialPage": "https://5pbdxb.sharepoint.com/sites/dpex-testing/SitePages/Ontology-Editor.aspx?debug=true&noredir=true&debugManifestsFile=https://localhost:4321/temp/build/manifests.js"
+  "initialPage": "https://5pbdxb.sharepoint.com/sites/dpex-testing/SitePages/Ontology-Editor---2.aspx?debug=true&noredir=true&debugManifestsFile=https://localhost:4321/temp/build/manifests.js"
 }
