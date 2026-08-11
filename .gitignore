@@ -4,6 +4,10 @@ lib/
 solution/
 temp/
 *.sppkg
+# ...except the installable package, which IS shipped in the repo
+!sharepoint/solution/
+sharepoint/solution/*
+!sharepoint/solution/*.sppkg
 
 # Dependencies
 node_modules/
