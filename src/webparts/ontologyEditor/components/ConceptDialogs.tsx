@@ -566,15 +566,37 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
     predicateUri || 'http://www.w3.org/2004/02/skos/core#definition'
   );
 
-  // Offer the annotation predicates already used in the model, so the editor
-  // does not invent new vocabulary by accident.
+  // The standard note fields (Semaphore's "first class metadata"), so a blank
+  // ontology has somewhere to start...
+  const SKOS = 'http://www.w3.org/2004/02/skos/core#';
+  const standard: Array<[string, string]> = [
+    [SKOS + 'definition', 'definition'],
+    [SKOS + 'scopeNote', 'scope note'],
+    [SKOS + 'editorialNote', 'editorial note'],
+    [SKOS + 'historyNote', 'history note'],
+    [SKOS + 'example', 'example'],
+    ['http://www.w3.org/2000/01/rdf-schema#comment', 'comment']
+  ];
+  // ...merged with every predicate already used in the model, so an imported
+  // ontology offers its own vocabulary too rather than inventing new terms.
   const predOptions: IDropdownOption[] = React.useMemo(() => {
+    const seen: { [uri: string]: true } = {};
+    const options: IDropdownOption[] = [];
+    for (const [uri, text] of standard) {
+      seen[uri] = true;
+      options.push({ key: uri, text });
+    }
     const rows = db.raw.exec(
       `SELECT predicate_uri, COUNT(*) n FROM annotations GROUP BY 1 ORDER BY n DESC LIMIT 40`
     );
-    return rows.length
-      ? rows[0].values.map(r => ({ key: String(r[0]), text: localName(String(r[0])) }))
-      : [];
+    if (rows.length) {
+      for (const r of rows[0].values) {
+        const uri = String(r[0]);
+        if (!seen[uri]) options.push({ key: uri, text: localName(uri) });
+      }
+    }
+    return options;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
 
   return (
