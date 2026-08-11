@@ -25,7 +25,7 @@ import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../
 import { IConceptEditHandlers } from './ConceptDetail';
 import {
   NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
-  RenamePrompt, PropertyPicker, ConfirmDialog
+  RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog
 } from './ConceptDialogs';
 import { localName } from '../../../services/turtle/Vocabulary';
 
@@ -37,6 +37,7 @@ type DialogState =
   | { kind: 'addLabel' }
   | { kind: 'editLabel'; label: ILabel }
   | { kind: 'pickRelationshipProperty' }
+  | { kind: 'newProperty' }
   | { kind: 'pickRelationshipTarget'; propertyId: number; propertyLabel: string }
   | { kind: 'pickBroader' }
   | { kind: 'addAnnotation' }
@@ -530,6 +531,32 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             onCancel={closeDialog}
             onPick={(propertyId, propertyLabel) =>
               setDialog({ kind: 'pickRelationshipTarget', propertyId, propertyLabel })}
+            onDefineNew={() => setDialog({ kind: 'newProperty' })}
+          />
+        );
+      }
+
+      case 'newProperty': {
+        const current = db.getConcept(selectedId as number);
+        return (
+          <NewPropertyDialog
+            db={db}
+            suggestedDomainClassId={current ? current.classId : undefined}
+            error={dialogError}
+            onCancel={closeDialog}
+            onCreate={(opts) => {
+              let created: { propertyId: number } | undefined;
+              const ok = mutate(() => { created = writer.createPropertyPair(opts); });
+              if (ok && created) {
+                // Flow straight into using it, which is why you defined it.
+                setClassLabels(db.getClassLabelMap());
+                setDialog({
+                  kind: 'pickRelationshipTarget',
+                  propertyId: created.propertyId,
+                  propertyLabel: opts.label
+                });
+              }
+            }}
           />
         );
       }

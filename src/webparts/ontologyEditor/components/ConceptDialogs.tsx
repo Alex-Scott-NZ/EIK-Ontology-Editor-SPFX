@@ -306,7 +306,9 @@ export const PropertyPicker: React.FC<{
   properties: Array<{ propertyId: number; label: string | undefined; rangeClassName: string | undefined; definition: string | undefined }>;
   onCancel: () => void;
   onPick: (propertyId: number, propertyLabel: string) => void;
-}> = ({ properties, onCancel, onPick }) => (
+  /** Offers "define a new type" inline, so a missing type is not a dead end. */
+  onDefineNew?: () => void;
+}> = ({ properties, onCancel, onPick, onDefineNew }) => (
   <Dialog
     hidden={false}
     onDismiss={onCancel}
@@ -340,15 +342,127 @@ export const PropertyPicker: React.FC<{
       {properties.length === 0 && (
         <div className={styles.muted} style={{ padding: 8 }}>
           No relationships are declared for this concept&rsquo;s class. Give it a
-          class first, or add the property to the model.
+          class, or define a new relationship type below.
         </div>
       )}
     </div>
     <DialogFooter>
+      {onDefineNew && (
+        <DefaultButton
+          text="Define a new type…"
+          iconProps={{ iconName: 'Add' }}
+          onClick={onDefineNew}
+        />
+      )}
       <DefaultButton text="Cancel" onClick={onCancel} />
     </DialogFooter>
   </Dialog>
 );
+
+/* --------------------------------------------- new relationship TYPE -- */
+
+export interface INewPropertyDialogProps {
+  db: OntologyDatabase;
+  /** Pre-selects the domain — usually the class of the concept you started from. */
+  suggestedDomainClassId?: number;
+  error?: string;
+  onCancel: () => void;
+  onCreate: (options: {
+    label: string; inverseLabel?: string;
+    domainClassId?: number; rangeClassId?: number; definition?: string;
+  }) => void;
+}
+
+/**
+ * Defines a new relationship type — a change to the model, not to a concept.
+ *
+ * Domain and range are the whole point: they decide which concepts may use it
+ * and what they may point at. Leaving them blank is allowed but makes the
+ * relationship unconstrained, which is how validation stops being useful.
+ */
+export const NewPropertyDialog: React.FC<INewPropertyDialogProps> = (props) => {
+  const { db, suggestedDomainClassId, error, onCancel, onCreate } = props;
+
+  const [label, setLabel] = React.useState('');
+  const [inverseLabel, setInverseLabel] = React.useState('');
+  const [domainClassId, setDomainClassId] = React.useState<number | undefined>(suggestedDomainClassId);
+  const [rangeClassId, setRangeClassId] = React.useState<number | undefined>(undefined);
+  const [definition, setDefinition] = React.useState('');
+
+  const classOptions: IDropdownOption[] = React.useMemo(
+    () => db.getClasses().filter(c => !!c.label).map(c => ({ key: c.id, text: c.label as string })),
+    [db]
+  );
+  const anyOption: IDropdownOption = { key: -1, text: 'Any concept' };
+
+  const domainName = domainClassId !== undefined
+    ? (classOptions.filter(o => o.key === domainClassId)[0] || { text: '?' }).text : 'any concept';
+  const rangeName = rangeClassId !== undefined
+    ? (classOptions.filter(o => o.key === rangeClassId)[0] || { text: '?' }).text : 'any concept';
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: 'Define a new relationship type',
+        subText: 'This changes the model — every concept of the chosen class will be able to use it.'
+      }}
+      modalProps={{ isBlocking: true }}
+      minWidth={560}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      <TextField
+        label="Name" required autoFocus placeholder="e.g. Has responsible team"
+        value={label} onChange={(_, v) => setLabel(v || '')}
+      />
+      <TextField
+        label="Inverse name"
+        placeholder="e.g. Is responsible team for"
+        description="Leave blank only if the relationship genuinely reads one way. 142 of the model's 151 types are paired."
+        value={inverseLabel} onChange={(_, v) => setInverseLabel(v || '')}
+      />
+
+      <Dropdown
+        label="From (domain)"
+        selectedKey={domainClassId === undefined ? -1 : domainClassId}
+        options={[anyOption, ...classOptions]}
+        onChange={(_, o) => setDomainClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+      />
+      <Dropdown
+        label="To (range)"
+        selectedKey={rangeClassId === undefined ? -1 : rangeClassId}
+        options={[anyOption, ...classOptions]}
+        onChange={(_, o) => setRangeClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+      />
+
+      <MessageBar messageBarType={MessageBarType.info} isMultiline>
+        {label.trim() || 'This relationship'} will be usable from <strong>{domainName}</strong>
+        {' '}and may point at <strong>{rangeName}</strong>. Subclasses are included.
+      </MessageBar>
+
+      <TextField
+        label="Definition"
+        multiline rows={3}
+        description="Why this exists and when to use it. Shown in the picker — and it is the only place this reasoning will survive."
+        value={definition} onChange={(_, v) => setDefinition(v || '')}
+      />
+
+      <DialogFooter>
+        <PrimaryButton
+          text="Create" disabled={!label.trim()}
+          onClick={() => onCreate({
+            label, inverseLabel: inverseLabel.trim() || undefined,
+            domainClassId, rangeClassId, definition: definition.trim() || undefined
+          })}
+        />
+        <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
 
 /* ------------------------------------------------------------- confirm -- */
 

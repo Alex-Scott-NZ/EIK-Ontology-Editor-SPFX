@@ -17,7 +17,10 @@
  */
 
 import { Database } from 'sql.js';
-import { SKOSXL_PREF_LABEL, SKOS_BROADER } from '../turtle/Vocabulary';
+import {
+  SKOSXL_PREF_LABEL, SKOS_BROADER, RDF_TYPE, RDFS_LABEL,
+  OWL_OBJECT_PROPERTY, SKOS_DEFINITION
+} from '../turtle/Vocabulary';
 
 /** Namespace for concepts created in this editor, so provenance stays visible. */
 export const NEW_CONCEPT_NAMESPACE = 'http://example.com/InlandRevenueModel-editor#';
@@ -501,6 +504,97 @@ export class OntologyWriter {
       out[key] = [{ v: value, t: 'i' }];
     }
     return Object.keys(out).length ? JSON.stringify(out) : null;
+  }
+
+  // -- relationship TYPES (schema-level) -------------------------------------
+
+  /**
+   * Define a new relationship type, and usually its inverse at the same time.
+   *
+   * This is a change to the *model*, not to a concept: it adds an
+   * `owl:ObjectProperty` with a domain and range, which then governs every
+   * future use. Creating the pair together is deliberate — 142 of the model's
+   * 151 properties are paired, and a one-directional relationship is a
+   * decision worth making explicitly rather than by omission.
+   *
+   * Returns the new property id (and the inverse's, when created).
+   */
+  public createPropertyPair(options: {
+    label: string;
+    inverseLabel?: string;
+    domainClassId?: number;
+    rangeClassId?: number;
+    definition?: string;
+    /** Defaults to skos:related, matching how the model declares its own. */
+    subPropertyOf?: string;
+  }): { propertyId: number; inversePropertyId?: number } {
+    const label = options.label.trim();
+    if (!label) {
+      throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
+    }
+    if (options.inverseLabel && options.inverseLabel.trim() === label) {
+      throw new ValidationFailure([{
+        field: 'inverseLabel',
+        message: 'The inverse needs a different name — it reads in the opposite direction.'
+      }]);
+    }
+
+    const existing = this._one('SELECT 1 FROM properties WHERE label = ?', [label]);
+    if (existing !== undefined) {
+      throw new ValidationFailure([{
+        field: 'label', message: `A relationship type called "${label}" already exists.`
+      }]);
+    }
+
+    const sub = options.subPropertyOf || 'http://www.w3.org/2004/02/skos/core#related';
+
+    const insert = (lbl: string, domainId?: number, rangeId?: number): number => {
+      let uri = NEW_CONCEPT_NAMESPACE + slugify(lbl);
+      if (this._one('SELECT 1 FROM properties WHERE uri = ?', [uri]) !== undefined) {
+        uri = `${uri}-${uuid().slice(0, 8)}`;
+      }
+
+      // The exporter replays rdf:type, rdfs:label and skos:definition from
+      // flags_json — the importer leaves them there so multiple types and
+      // language tags survive. A new property with empty flags would therefore
+      // export with NO type and NO label, i.e. not recognisably a property at
+      // all. Seed them here.
+      const flags = JSON.stringify({
+        [RDF_TYPE]: [{ v: OWL_OBJECT_PROPERTY, t: 'i' }],
+        [RDFS_LABEL]: [{ v: lbl, t: 'l', lang: 'en' }],
+        ...(options.definition
+          ? { [SKOS_DEFINITION]: [{ v: options.definition, t: 'l', lang: 'en' }] }
+          : {})
+      });
+
+      this._run(
+        `INSERT INTO properties
+           (uri, label, domain_class_id, range_class_id, sub_property_of, is_label_property,
+            definition, flags_json)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+        [uri, lbl, domainId === undefined ? null : domainId,
+         rangeId === undefined ? null : rangeId, sub, options.definition || null, flags]
+      );
+      const id = this._lastId();
+      this._journal('insert', 'relationship', uri, {
+        kind: 'propertyDefinition', label: lbl, domainClassId: domainId, rangeClassId: rangeId
+      });
+      return id;
+    };
+
+    const propertyId = insert(label, options.domainClassId, options.rangeClassId);
+
+    let inversePropertyId: number | undefined;
+    if (options.inverseLabel && options.inverseLabel.trim()) {
+      // The inverse reads the other way, so its domain and range swap.
+      inversePropertyId = insert(
+        options.inverseLabel.trim(), options.rangeClassId, options.domainClassId
+      );
+      this._run('UPDATE properties SET inverse_property_id = ? WHERE id = ?', [inversePropertyId, propertyId]);
+      this._run('UPDATE properties SET inverse_property_id = ? WHERE id = ?', [propertyId, inversePropertyId]);
+    }
+
+    return { propertyId, inversePropertyId };
   }
 
   // -- annotations (metadata) ------------------------------------------------
