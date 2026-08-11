@@ -331,15 +331,18 @@ export class OntologyDatabase {
 
   public getAnnotations(conceptId: number): IAnnotation[] {
     return this._rows(
-      `SELECT id, predicate_uri, value, lang, datatype FROM annotations
-       WHERE concept_id = ? ORDER BY predicate_uri`,
+      `SELECT a.id, a.predicate_uri, a.value, a.lang, a.datatype, p.label
+       FROM annotations a
+       LEFT JOIN properties p ON p.uri = a.predicate_uri
+       WHERE a.concept_id = ? ORDER BY a.predicate_uri`,
       [conceptId]
     ).map(r => ({
       id: Number(r[0]),
       predicateUri: String(r[1]),
       value: str(r[2]),
       lang: str(r[3]),
-      datatype: str(r[4])
+      datatype: str(r[4]),
+      displayLabel: str(r[5])
     }));
   }
 

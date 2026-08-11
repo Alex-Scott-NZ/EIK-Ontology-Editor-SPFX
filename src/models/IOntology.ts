@@ -89,6 +89,12 @@ export interface IAnnotation {
   lang: string | undefined;
   /** xsd datatype IRI (date, boolean, ...); undefined = plain/lang string. */
   datatype: string | undefined;
+  /**
+   * The defined field's rdfs:label ("Risk rating"), when the predicate has a
+   * definition in `properties`. Display falls back to the URI's local name
+   * ("Risk-rating") only for predicates with no definition.
+   */
+  displayLabel: string | undefined;
 }
 
 /**

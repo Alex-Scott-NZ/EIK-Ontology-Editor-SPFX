@@ -216,7 +216,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
             {detail.annotations.map(a => (
               <div key={a.id} className={styles.metadataField}>
                 <div className={styles.metadataName}>
-                  {localName(a.predicateUri)}
+                  {a.displayLabel || localName(a.predicateUri)}
                   {edit && (
                     <span className={styles.rowActions}>
                       <RowAction icon="Edit" title="Edit value" onClick={() => edit.onEditAnnotation(a)} />

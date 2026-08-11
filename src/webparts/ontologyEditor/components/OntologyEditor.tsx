@@ -309,7 +309,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       onDeleteAnnotation: (annotation) => setDialog({
         kind: 'confirm',
         title: 'Delete metadata',
-        message: `Delete this ${localName(annotation.predicateUri)} value?`,
+        message: `Delete this ${annotation.displayLabel || localName(annotation.predicateUri)} value?`,
         act: () => { if (mutate(() => writer.deleteAnnotation(annotation.id))) closeDialog(); }
       })
     };
