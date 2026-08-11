@@ -1,8 +1,8 @@
 # Semaphore comparison — results
 
-Companion to [../SEMAPHORE-COMPARISON.md](../SEMAPHORE-COMPARISON.md), which
-holds the checklist and every expected value. Run date, model version, and
-verdicts get recorded here; screenshots go in this folder.
+Companion to [CHECKLIST.md](CHECKLIST.md), which holds the checklist and every
+expected value. Run date, model version, and verdicts get recorded here;
+screenshots go in this folder.
 
 **Screenshot naming:** `<section>-<what>-<side>.png`, where side is `sem`
 (Semaphore) or `ed` (editor). Examples:

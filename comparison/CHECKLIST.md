@@ -5,9 +5,9 @@ Every expected value below was extracted from a **pristine import** of
 `InlandRevenueModel.ttl` (no edits) on 2026-08-11. Regenerate after any re-export
 with `npm --prefix tools run compare` (writes `data/compare-extract.txt`).
 
-Results live in [comparison-results/RESULTS.md](comparison-results/RESULTS.md)
-— verdicts per section, discrepancy log, and the screenshots themselves (naming
-convention at the top of that file).
+Results live in [RESULTS.md](RESULTS.md) in this same folder — verdicts per
+section, discrepancy log, and the screenshots themselves (naming convention at
+the top of that file). Everything comparison-related belongs in `comparison/`.
 
 How to record a discrepancy: note the section number, what Semaphore shows, what
 the editor shows, and a screenshot of each. Every discrepancy will be one of
