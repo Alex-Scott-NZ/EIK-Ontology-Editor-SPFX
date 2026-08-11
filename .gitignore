@@ -12,6 +12,8 @@ node_modules/
 data/*.sqlite
 # Regenerated Turtle export — rebuild with: npm --prefix tools run export
 data/*.ttl
+# Regenerated comparison data — rebuild with: npm --prefix tools run compare
+data/compare-extract.txt
 
 # Logs / OS
 npm-debug.log*
