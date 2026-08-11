@@ -1,0 +1,13 @@
+{ "head": {
+    "vars": [ "language" , "prefLabelCount" , "altLabelCount" ]
+  } ,
+  "results": {
+    "bindings": [
+      { 
+        "language": { "type": "literal" , "value": "en" } ,
+        "prefLabelCount": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "10796" } ,
+        "altLabelCount": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "15599" }
+      }
+    ]
+  }
+}

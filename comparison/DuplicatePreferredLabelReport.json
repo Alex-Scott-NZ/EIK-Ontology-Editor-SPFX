@@ -1,0 +1,28 @@
+{ "head": {
+    "vars": [ "label" , "count" ]
+  } ,
+  "results": {
+    "bindings": [
+      { 
+        "label": { "type": "literal" , "xml:lang": "en" , "value": "Chinese" } ,
+        "count": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "2" }
+      } ,
+      { 
+        "label": { "type": "literal" , "xml:lang": "en" , "value": "General Ledger" } ,
+        "count": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "2" }
+      } ,
+      { 
+        "label": { "type": "literal" , "xml:lang": "en" , "value": "Intelligence" } ,
+        "count": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "2" }
+      } ,
+      { 
+        "label": { "type": "literal" , "xml:lang": "en" , "value": "Party" } ,
+        "count": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "2" }
+      } ,
+      { 
+        "label": { "type": "literal" , "xml:lang": "en" , "value": "Property" } ,
+        "count": { "type": "literal" , "datatype": "http://www.w3.org/2001/XMLSchema#integer" , "value": "2" }
+      }
+    ]
+  }
+}
