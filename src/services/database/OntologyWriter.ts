@@ -530,7 +530,7 @@ export class OntologyWriter {
   }): number {
     const label = options.label.trim();
     if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
-    if (this._one('SELECT 1 FROM classes WHERE label = ?', [label]) !== undefined) {
+    if (this._one('SELECT 1 FROM classes WHERE label = ? COLLATE NOCASE', [label]) !== undefined) {
       throw new ValidationFailure([{ field: 'label', message: `A class called "${label}" already exists.` }]);
     }
 
@@ -572,7 +572,7 @@ export class OntologyWriter {
     const label = changes.label === undefined ? undefined : changes.label.trim();
     if (label !== undefined) {
       if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
-      const clash = this._one('SELECT 1 FROM classes WHERE label = ? AND id != ?', [label, classId]);
+      const clash = this._one('SELECT 1 FROM classes WHERE label = ? COLLATE NOCASE AND id != ?', [label, classId]);
       if (clash !== undefined) {
         throw new ValidationFailure([{ field: 'label', message: `A class called "${label}" already exists.` }]);
       }
@@ -664,7 +664,7 @@ export class OntologyWriter {
       }]);
     }
 
-    const existing = this._one('SELECT 1 FROM properties WHERE label = ?', [label]);
+    const existing = this._one('SELECT 1 FROM properties WHERE label = ? COLLATE NOCASE', [label]);
     if (existing !== undefined) {
       throw new ValidationFailure([{
         field: 'label', message: `A relationship type called "${label}" already exists.`
@@ -741,7 +741,7 @@ export class OntologyWriter {
       if (label !== undefined) {
         const trimmed = label.trim();
         if (!trimmed) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
-        const clash = this._one('SELECT 1 FROM properties WHERE label = ? AND id != ?', [trimmed, id]);
+        const clash = this._one('SELECT 1 FROM properties WHERE label = ? COLLATE NOCASE AND id != ?', [trimmed, id]);
         if (clash !== undefined) {
           throw new ValidationFailure([{ field: 'label', message: `A relationship type called "${trimmed}" already exists.` }]);
         }
@@ -814,7 +814,7 @@ export class OntologyWriter {
   }, rdfType: string, isLabelProperty: 0 | 1, journalKind: string): number {
     const label = options.label.trim();
     if (!label) throw new ValidationFailure([{ field: 'label', message: 'A name is required.' }]);
-    if (this._one('SELECT 1 FROM properties WHERE label = ?', [label]) !== undefined) {
+    if (this._one('SELECT 1 FROM properties WHERE label = ? COLLATE NOCASE', [label]) !== undefined) {
       throw new ValidationFailure([{
         field: 'label', message: `A field or type called "${label}" already exists.`
       }]);
