@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {
-  DefaultButton, PrimaryButton, TextField, Dropdown, IDropdownOption,
+  DefaultButton, PrimaryButton, TextField, IDropdownOption,
   Dialog, DialogType, DialogFooter, MessageBar, MessageBarType,
   SearchBox, Icon
 } from '@fluentui/react';
@@ -8,7 +8,7 @@ import styles from './OntologyEditor.module.scss';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { OntologyWriter } from '../../../services/database/OntologyWriter';
 import { IOntologyClass, IOntologyProperty } from '../../../models/IOntology';
-import { NewPropertyDialog } from './ConceptDialogs';
+import { NewPropertyDialog, FilteringCombo } from './ConceptDialogs';
 
 /**
  * The Model tab: Semaphore's model-administration screens, reduced to the two
@@ -82,11 +82,11 @@ const ClassDialog: React.FC<{
         value={label} onChange={(_, v) => setLabel(v || '')}
       />
       {showParent && (
-        <Dropdown
+        <FilteringCombo
           label="Parent class"
           selectedKey={parentClassId === undefined ? -1 : parentClassId}
           options={parentOptions}
-          onChange={(_, o) => setParentClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+          onPick={(k) => setParentClassId(Number(k) >= 0 ? Number(k) : undefined)}
         />
       )}
       <TextField
@@ -160,11 +160,11 @@ const SimpleDefinitionDialog: React.FC<{
         value={label} onChange={(_, v) => setLabel(v || '')}
       />
       {showDomain && (
-        <Dropdown
+        <FilteringCombo
           label="Applies to (domain)"
           selectedKey={domainClassId === undefined ? -1 : domainClassId}
           options={domainOptions}
-          onChange={(_, o) => setDomainClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+          onPick={(k) => setDomainClassId(Number(k) >= 0 ? Number(k) : undefined)}
         />
       )}
       {showDomain && <p style={{ fontSize: 12, margin: '4px 0 0' }}>{domainHint}</p>}
@@ -190,13 +190,23 @@ const SimpleDefinitionDialog: React.FC<{
 const EditPropertyDialog: React.FC<{
   prop: IOntologyProperty;
   inverseLabel?: string;
+  classes: IOntologyClass[];
   error?: string;
   onCancel: () => void;
-  onSave: (v: { label: string; inverseLabel?: string; definition?: string }) => void;
-}> = ({ prop, inverseLabel, error, onCancel, onSave }) => {
+  onSave: (v: {
+    label: string; inverseLabel?: string; definition?: string;
+    domainClassId: number | null; rangeClassId: number | null;
+  }) => void;
+}> = ({ prop, inverseLabel, classes, error, onCancel, onSave }) => {
   const [label, setLabel] = React.useState(prop.label || '');
   const [inv, setInv] = React.useState(inverseLabel || '');
   const [definition, setDefinition] = React.useState(prop.definition || '');
+  const [domainId, setDomainId] = React.useState<number>(prop.domainClassId === undefined ? -1 : prop.domainClassId);
+  const [rangeId, setRangeId] = React.useState<number>(prop.rangeClassId === undefined ? -1 : prop.rangeClassId);
+  const classOptions: IDropdownOption[] = [
+    { key: -1, text: 'Any concept' },
+    ...classes.filter(c => !!c.label).map(c => ({ key: c.id, text: c.label as string }))
+  ];
   return (
     <Dialog
       hidden={false}
@@ -204,7 +214,7 @@ const EditPropertyDialog: React.FC<{
       dialogContentProps={{
         type: DialogType.normal,
         title: 'Edit relationship type',
-        subText: 'Domain and range are fixed — changing them would silently invalidate existing links. Delete and recreate if the constraint is wrong.'
+        subText: 'Tightening From/To is refused if existing links would violate it — nothing is silently invalidated.'
       }}
       modalProps={{ isBlocking: true }}
       minWidth={480}
@@ -214,6 +224,18 @@ const EditPropertyDialog: React.FC<{
       {inverseLabel !== undefined && (
         <TextField label="Inverse name" value={inv} onChange={(_, v) => setInv(v || '')} />
       )}
+      <FilteringCombo
+        label="From (domain)"
+        selectedKey={domainId}
+        options={classOptions}
+        onPick={(k) => setDomainId(Number(k))}
+      />
+      <FilteringCombo
+        label="To (range)"
+        selectedKey={rangeId}
+        options={classOptions}
+        onPick={(k) => setRangeId(Number(k))}
+      />
       <TextField
         label="Definition" multiline rows={3}
         value={definition} onChange={(_, v) => setDefinition(v || '')}
@@ -224,7 +246,9 @@ const EditPropertyDialog: React.FC<{
           onClick={() => onSave({
             label: label.trim(),
             inverseLabel: inverseLabel !== undefined ? inv.trim() : undefined,
-            definition: definition.trim() || undefined
+            definition: definition.trim() || undefined,
+            domainClassId: domainId < 0 ? null : domainId,
+            rangeClassId: rangeId < 0 ? null : rangeId
           })}
         />
         <DefaultButton text="Cancel" onClick={onCancel} />
@@ -647,6 +671,7 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
       {dialog.kind === 'editProperty' && (
         <EditPropertyDialog
           prop={dialog.prop}
+          classes={classes}
           inverseLabel={
             dialog.prop.inversePropertyId !== undefined &&
             dialog.prop.inversePropertyId !== dialog.prop.id &&

@@ -803,12 +803,62 @@ export class OntologyWriter {
    */
   public updatePropertyPair(propertyId: number, changes: {
     label?: string; inverseLabel?: string; definition?: string;
+    /** null clears the constraint (any concept); undefined leaves it alone. */
+    domainClassId?: number | null; rangeClassId?: number | null;
   }): void {
     const row = this._rows(
       'SELECT uri, label, definition, inverse_property_id FROM properties WHERE id = ?', [propertyId]
     )[0];
     if (!row) throw new ValidationFailure([{ field: 'property', message: 'That relationship type no longer exists.' }]);
     const inverseId = row[3] === null || row[3] === undefined ? undefined : Number(row[3]);
+
+    // Domain/range edits are allowed, but never silently: if any stored link
+    // would violate the new constraint, refuse with the count. (The inverse
+    // property reads the other way, so its domain is this range and vice versa.)
+    if (changes.domainClassId !== undefined || changes.rangeClassId !== undefined) {
+      const clsLabel = (id: number): string =>
+        String(this._one('SELECT label FROM classes WHERE id = ?', [id]) || 'that class');
+      const badCount = (propId: number, end: 'source' | 'target', classId: number): number => Number(this._one(
+        `SELECT COUNT(*) FROM relationships r
+         JOIN concepts c ON c.id = r.${end}_concept_id
+         WHERE r.property_id = ?
+           AND (c.class_id IS NULL OR c.class_id NOT IN (
+             SELECT class_id FROM v_class_ancestry WHERE ancestor_id = ?))`,
+        [propId, classId]
+      ) || 0);
+      const errors: IValidationError[] = [];
+      const D = changes.domainClassId;
+      const R = changes.rangeClassId;
+      const hasDistinctInverse = inverseId !== undefined && inverseId !== propertyId;
+      if (D !== undefined && D !== null) {
+        const n = badCount(propertyId, 'source', D) + (hasDistinctInverse ? badCount(inverseId as number, 'target', D) : 0);
+        if (n) {
+          errors.push({
+            field: 'domain',
+            message: `${n} existing link${n === 1 ? '' : 's'} would violate From: ${clsLabel(D)}. Change or remove them first.`
+          });
+        }
+      }
+      if (R !== undefined && R !== null) {
+        const n = badCount(propertyId, 'target', R) + (hasDistinctInverse ? badCount(inverseId as number, 'source', R) : 0);
+        if (n) {
+          errors.push({
+            field: 'range',
+            message: `${n} existing link${n === 1 ? '' : 's'} would violate To: ${clsLabel(R)}. Change or remove them first.`
+          });
+        }
+      }
+      if (errors.length) throw new ValidationFailure(errors);
+
+      const set = (id: number, d: number | null | undefined, r: number | null | undefined): void => {
+        if (d !== undefined) this._run('UPDATE properties SET domain_class_id = ? WHERE id = ?', [d, id]);
+        if (r !== undefined) this._run('UPDATE properties SET range_class_id = ? WHERE id = ?', [r, id]);
+      };
+      set(propertyId, D, R);
+      if (hasDistinctInverse) set(inverseId as number, R, D);
+      this._journal('update', 'relationship', String(row[0]),
+        { kind: 'propertyConstraint', domainClassId: D, rangeClassId: R });
+    }
 
     const apply = (id: number, uri: string, label?: string, definition?: string): void => {
       if (label !== undefined) {

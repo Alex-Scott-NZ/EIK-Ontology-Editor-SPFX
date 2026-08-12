@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton,
-  TextField, Dropdown, IDropdownOption, ComboBox, SearchBox, MessageBar, MessageBarType,
+  TextField, Dropdown, IDropdownOption, ComboBox, IComboBox, SearchBox, MessageBar, MessageBarType,
   ChoiceGroup, IChoiceGroupOption, Label as FluentLabel
 } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
@@ -57,12 +57,12 @@ export const NewConceptDialog: React.FC<INewConceptDialogProps> = (props) => {
         onKeyDown={e => { if (e.key === 'Enter' && label.trim()) onCreate(label, classId); }}
       />
 
-      <Dropdown
+      <FilteringCombo
         label="Concept class"
         placeholder="Select a class"
         selectedKey={classId}
         options={classOptions}
-        onChange={(_, o) => setClassId(o ? Number(o.key) : undefined)}
+        onPick={(k) => setClassId(Number(k))}
       />
       <p className={styles.muted}>
         The class decides which relationships this concept may take. Without one
@@ -164,11 +164,11 @@ export const ChangeClassDialog: React.FC<{
     >
       {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
 
-      <Dropdown
+      <FilteringCombo
         label="Concept class"
         selectedKey={classId === undefined ? -1 : classId}
         options={options}
-        onChange={(_, o) => setClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+        onPick={(k) => setClassId(Number(k) >= 0 ? Number(k) : undefined)}
       />
       <MessageBar messageBarType={MessageBarType.info} isMultiline>
         Existing relationships are kept even if the new class would not allow
@@ -550,17 +550,17 @@ export const NewPropertyDialog: React.FC<INewPropertyDialogProps> = (props) => {
         value={inverseLabel} onChange={(_, v) => setInverseLabel(v || '')}
       />
 
-      <Dropdown
+      <FilteringCombo
         label="From (domain)"
         selectedKey={domainClassId === undefined ? -1 : domainClassId}
         options={[anyOption, ...classOptions]}
-        onChange={(_, o) => setDomainClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+        onPick={(k) => setDomainClassId(Number(k) >= 0 ? Number(k) : undefined)}
       />
-      <Dropdown
+      <FilteringCombo
         label="To (range)"
         selectedKey={rangeClassId === undefined ? -1 : rangeClassId}
         options={[anyOption, ...classOptions]}
-        onChange={(_, o) => setRangeClassId(o && Number(o.key) >= 0 ? Number(o.key) : undefined)}
+        onPick={(k) => setRangeClassId(Number(k) >= 0 ? Number(k) : undefined)}
       />
 
       <MessageBar messageBarType={MessageBarType.info} isMultiline>
@@ -617,6 +617,57 @@ export const ConfirmDialog: React.FC<{
     </DialogFooter>
   </Dialog>
 );
+
+/* ------------------------------------------------- filtering combo box -- */
+
+/**
+ * A ComboBox whose menu actually narrows as you type. Fluent's own
+ * autoComplete only moves the highlight to the first match — with 108
+ * classes that reads as "there is no search". Substring, case-insensitive.
+ */
+export const FilteringCombo: React.FC<{
+  label: string;
+  placeholder?: string;
+  selectedKey: number | string | undefined;
+  options: IDropdownOption[];
+  onPick: (key: number | string) => void;
+}> = ({ label, placeholder, selectedKey, options, onPick }) => {
+  const [filter, setFilter] = React.useState('');
+  const comboRef = React.useRef<IComboBox>(null);
+  const menuOpen = React.useRef(false);
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? options.filter(o => o.text.toLowerCase().indexOf(needle) >= 0)
+    : options;
+  return (
+    <ComboBox
+      componentRef={comboRef}
+      label={label}
+      placeholder={placeholder || 'Type to filter…'}
+      selectedKey={selectedKey}
+      options={shown.length ? shown : [{ key: '__none__', text: 'No matches', disabled: true }]}
+      allowFreeform
+      autoComplete="off"
+      useComboBoxAsMenuWidth
+      openOnKeyboardFocus
+      // Capped so the unfiltered list of 100+ classes still fits BELOW the
+      // field and scrolls inside — otherwise Fluent's positioning gives up
+      // and throws a full-height column beside the dialog.
+      calloutProps={{ calloutMaxHeight: 320 }}
+      onMenuOpen={() => { menuOpen.current = true; }}
+      onMenuDismissed={() => { menuOpen.current = false; }}
+      onInputValueChange={(v) => {
+        setFilter(v || '');
+        // Typing into a closed box must open the menu, or the filtering is
+        // invisible — Fluent only opens it from the caret by default.
+        if (!menuOpen.current && comboRef.current) comboRef.current.focus(true);
+      }}
+      onChange={(_, o) => {
+        if (o && o.key !== '__none__') { onPick(o.key); setFilter(''); }
+      }}
+    />
+  );
+};
 
 /* ------------------------------------------------------------- metadata -- */
 
@@ -696,16 +747,12 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
       modalProps={{ isBlocking: true }}
       minWidth={520}
     >
-      {/* ComboBox, not Dropdown: the model defines dozens of fields, so
-          typing filters the list down to what you're after. */}
-      <ComboBox
+      {/* The model defines dozens of fields — typing filters the list. */}
+      <FilteringCombo
         label="Field"
         selectedKey={pred}
         options={predOptions}
-        allowFreeform={false}
-        autoComplete="on"
-        useComboBoxAsMenuWidth
-        onChange={(_, o) => { if (o) setPred(String(o.key)); }}
+        onPick={(k) => setPred(String(k))}
       />
       <TextField label="Value" multiline rows={5} autoFocus value={value} onChange={(_, v) => setValue(v || '')} />
       <DialogFooter>
