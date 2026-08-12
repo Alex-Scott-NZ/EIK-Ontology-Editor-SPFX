@@ -314,11 +314,20 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
   };
   const jumpTo = (id: string): void => {
     setSection(id, true);
-    // Let the section render open before scrolling to it.
-    setTimeout(() => {
+    // Two frames let React commit and layout settle before the scroll starts.
+    // Smooth scrollIntoView is an animation toward a coordinate, and SharePoint
+    // pages scroll in a nested region — on some machines/browsers the animation
+    // is abandoned mid-flight, so after it should have finished we check
+    // whether it arrived and snap the rest of the way if not.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = document.getElementById(`model-${id}`);
-      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
+      if (!el || !el.scrollIntoView) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        const top = el.getBoundingClientRect().top;
+        if (top < 0 || top > 160) el.scrollIntoView({ block: 'start' });
+      }, 700);
+    }));
   };
 
   const [dialog, setDialog] = React.useState<ModelDialog>({ kind: 'none' });
