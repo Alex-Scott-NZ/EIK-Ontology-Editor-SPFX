@@ -14,6 +14,7 @@ import ModelManager from './ModelManager';
 import ConceptDetailPane from './ConceptDetail';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
+import { exportTurtle } from '../../../services/export/TurtleExporter';
 import { getSqlJs } from '../../../services/database/sqlJsLoader';
 import { OntologyWriter, ValidationFailure, ILabelFlagEdit } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
@@ -459,6 +460,15 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     {
       key: 'saveAs', text: 'Save as…', iconProps: { iconName: 'SaveAs' },
       onClick: () => { setDialog({ kind: 'saveAs' }); }
+    },
+    {
+      key: 'exportTtl', text: 'Export Turtle…', iconProps: { iconName: 'Export' },
+      title: 'Downloads the whole ontology as a Semaphore-compatible .ttl (includes unsaved changes)',
+      onClick: () => {
+        if (!db) return;
+        const { ttl } = exportTurtle(db.raw);
+        downloadBytes(new TextEncoder().encode(ttl), fileName.replace(/\.sqlite$/i, '') + '.ttl');
+      }
     },
     {
       key: 'undo', text: 'Undo', iconProps: { iconName: 'Undo' },

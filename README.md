@@ -18,6 +18,7 @@ Full audit: [docs/LEGACY-AUDIT.md](docs/LEGACY-AUDIT.md).
 
 | Doc | What it covers |
 |---|---|
+| [comparison/TEST-SCRIPT.md](comparison/TEST-SCRIPT.md) | **Hands-on walkthrough**: Part A exercises the Model tab on the real IR ontology; Part B builds an ontology from scratch — classes → relationship types → concepts → links → labels → metadata → save → Turtle export. |
 | [docs/ONTOLOGY-MODEL.md](docs/ONTOLOGY-MODEL.md) | How the model is represented: triples, concepts, classes, `skos:broader`, domain/range/inverse, SKOS-XL labels. Start here if RDF is unfamiliar. |
 | [docs/REPLACING-SEMAPHORE.md](docs/REPLACING-SEMAPHORE.md) | **The embedded knowledge that must survive** — matching flags, schema definitions, field rules, and the constraints Semaphore enforced that this tool must now enforce. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions and their reasoning. |
