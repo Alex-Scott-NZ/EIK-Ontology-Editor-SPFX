@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   SearchBox, Spinner, SpinnerSize, MessageBar, MessageBarType,
-  CommandBar, ICommandBarItemProps, Pivot, PivotItem, Icon
+  CommandBar, ICommandBarItemProps, Pivot, PivotItem, Icon, ActionButton
 } from '@fluentui/react';
 import { SqlJsStatic } from 'sql.js';
 
@@ -12,6 +12,7 @@ import ConceptTree, { ITreeFilter } from './ConceptTree';
 import ConceptList from './ConceptList';
 import ModelManager from './ModelManager';
 import ConceptDetailPane from './ConceptDetail';
+import { WalkthroughPanel } from './WalkthroughPanel';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { exportTurtle } from '../../../services/export/TurtleExporter';
@@ -88,6 +89,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
 
   const [mainView, setMainView] = React.useState<MainView>('concepts');
   const [browse, setBrowse] = React.useState<BrowseMode>('tree');
+  const [walkthroughOpen, setWalkthroughOpen] = React.useState<boolean>(false);
   const [search, setSearch] = React.useState<string>('');
   const [selectedId, setSelectedId] = React.useState<number | undefined>(undefined);
   const [revealPath, setRevealPath] = React.useState<number[] | undefined>(undefined);
@@ -496,6 +498,16 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     }
   ];
 
+  // Right-hand side of the bar: help-shaped things, not file operations.
+  const farCommands: ICommandBarItemProps[] = [
+    {
+      key: 'walkthrough', text: 'Walkthrough', iconProps: { iconName: 'Education' },
+      title: 'Step-by-step guide: build an ontology from scratch (floats over the editor)',
+      checked: walkthroughOpen,
+      onClick: () => setWalkthroughOpen(o => !o)
+    }
+  ];
+
   // -- Render ----------------------------------------------------------------
 
   if (stage === 'working') {
@@ -512,6 +524,19 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   if (stage === 'choosing' || !db) {
     return (
       <div className={styles.ontologyEditor}>
+        {/* The walkthrough's first step IS this picker ("Start a new
+            ontology"), so it must be reachable from here, not only from the
+            loaded-editor command bar. */}
+        <div className={styles.pickerWalkthroughLink}>
+          <ActionButton
+            iconProps={{ iconName: 'Education' }}
+            checked={walkthroughOpen}
+            onClick={() => setWalkthroughOpen(o => !o)}
+          >
+            Walkthrough: build an ontology from scratch
+          </ActionButton>
+        </div>
+        {walkthroughOpen && <WalkthroughPanel onClose={() => setWalkthroughOpen(false)} />}
         <SourcePicker
           libraryFolder={effectiveFolder}
           onBrowseLibrary={
@@ -539,7 +564,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         </MessageBar>
       )}
 
-      <CommandBar items={commands} className={styles.commandBar} />
+      <CommandBar items={commands} farItems={farCommands} className={styles.commandBar} />
+      {walkthroughOpen && <WalkthroughPanel onClose={() => setWalkthroughOpen(false)} />}
 
       {stats && (
         <div className={styles.statusBar}>

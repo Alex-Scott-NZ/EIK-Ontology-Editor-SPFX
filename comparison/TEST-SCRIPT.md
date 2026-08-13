@@ -1,6 +1,6 @@
 # Editor test script — Model tab & building an ontology from scratch
 
-Version 0.6.6.0. Two parts: **A** exercises the Model tab on the real IR
+Version 0.6.7.0. Two parts: **A** exercises the Model tab on the real IR
 ontology; **B** builds a small ontology from nothing and ends by exporting it
 as Turtle. Every step says what you should see — anything different is a bug,
 note it and carry on. The flow mirrors how the IR model itself is structured
@@ -17,6 +17,10 @@ Where things live since 0.6.4.0:
   Revert**. Save writes to the SharePoint library; a red **● n unsaved
   changes** badge sits in the status strip until you do.
 - Section **+** buttons sit right after each card's title.
+- Since 0.6.7.0 Part B is also built into the web part: **Walkthrough** (far
+  right of the command bar, or the link on the open-a-file screen) opens it
+  as a floating, draggable panel with tick-off steps — no need to keep this
+  file open beside the browser.
 
 Notes:
 - The change journal grew a new entry type in 0.3.0.0, so **.sqlite files

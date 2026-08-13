@@ -844,3 +844,180 @@
     color: #323130;
   }
 }
+
+/* ---------------------------------------------------- walkthrough panel -- */
+/* Floating Part-B walkthrough: fixed to the viewport so it rides along while
+   the editor scrolls. Dragged/resized per-session only — nothing stored.
+   z-index matches what SharePoint's edit-mode chrome needs beating. */
+
+.walkthroughPanel {
+  position: fixed;
+  top: 120px;
+  right: 24px;
+  width: 400px;
+  height: min(65vh, 640px);
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  background: "[theme:white, default:#ffffff]";
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  z-index: 999999;
+  font-size: 13px;
+}
+
+.walkthroughHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 8px 12px;
+  border-bottom: 1px solid "[theme:neutralLight, default:#edebe9]";
+  background: "[theme:neutralLighter, default:#f3f2f1]";
+  border-radius: 6px 6px 0 0;
+  cursor: move;
+  /* Drag chrome: text selection or touch-scroll mid-drag kills the pointer
+     capture, so neither is allowed to start here. */
+  user-select: none;
+  touch-action: none;
+}
+
+.walkthroughTitle {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.walkthroughProgress {
+  font-size: 12px;
+  font-weight: 600;
+  color: "[theme:themePrimary, default:#0078d4]";
+  background: "[theme:themeLighterAlt, default:#eff6fc]";
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.walkthroughClose {
+  color: "[theme:neutralSecondary, default:#605e5c]";
+}
+
+.walkthroughBody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* The resize grip owns the panel's bottom-right corner: the scrollbar runs
+     in its own gutter to the LEFT of that column (margin-right clears it),
+     and the gutter is reserved whether or not the bar is showing, so the
+     content never shifts when it appears. */
+  scrollbar-gutter: stable;
+  margin-right: 16px;
+  /* Constant right padding = the content's gap from the scrollbar. Fixed, so
+     it is reserved alongside the gutter — no shift when the bar appears. */
+  padding: 6px 8px 10px;
+
+  /* Default bars are chunky and `thin` is too skinny — a styled 10px track
+     splits the difference (webkit covers every browser SPFx supports). */
+  &::-webkit-scrollbar { width: 10px; }
+  &::-webkit-scrollbar-thumb {
+    background: "[theme:neutralTertiaryAlt, default:#c8c6c4]";
+    border-radius: 5px;
+
+    &:hover { background: "[theme:neutralTertiary, default:#a19f9d]"; }
+  }
+  &::-webkit-scrollbar-track { background: transparent; }
+}
+
+/* The drag affordance in the header. */
+.walkthroughGrip {
+  font-size: 16px;
+  color: "[theme:neutralSecondary, default:#605e5c]";
+}
+
+.walkthroughStep,
+.walkthroughStepDone {
+  border: 1px solid "[theme:neutralLighter, default:#f3f2f1]";
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.walkthroughStepDone {
+  background: "[theme:neutralLighterAlt, default:#faf9f8]";
+
+  .walkthroughStepTitle {
+    color: "[theme:neutralTertiary, default:#a19f9d]";
+    text-decoration: line-through;
+  }
+}
+
+.walkthroughStepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+
+  &:hover {
+    background: "[theme:neutralLighter, default:#f3f2f1]";
+  }
+}
+
+.walkthroughStepTitle {
+  font-weight: 600;
+}
+
+.walkthroughStepBody {
+  padding: 0 12px 10px 40px;
+
+  p, ul { margin: 6px 0; }
+  ul { padding-left: 18px; }
+  li { margin: 3px 0; }
+}
+
+/* The "Expect:" outcome lines — visually quieter than the instructions. */
+.walkthroughExpect {
+  color: "[theme:neutralSecondary, default:#605e5c]";
+  font-style: italic;
+}
+
+.walkthroughTable {
+  border-collapse: collapse;
+  margin: 6px 0;
+
+  td {
+    padding: 3px 8px 3px 0;
+    border-bottom: 1px solid "[theme:neutralLighter, default:#f3f2f1]";
+    vertical-align: top;
+  }
+}
+
+.walkthroughSwatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+
+.walkthroughResize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  /* Two short diagonal ridges, the conventional resize affordance. */
+  background:
+    linear-gradient(135deg, transparent 55%, #a19f9d 55%, #a19f9d 62%, transparent 62%,
+                    transparent 72%, #a19f9d 72%, #a19f9d 79%, transparent 79%);
+  border-radius: 0 0 6px 0;
+}
+
+/* Walkthrough entry point on the source-picker screen (its step 1 is the
+   picker itself, so the loaded-editor command bar can't be the only door). */
+.pickerWalkthroughLink {
+  display: flex;
+  justify-content: flex-end;
+}
