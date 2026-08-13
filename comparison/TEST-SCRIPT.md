@@ -1,6 +1,6 @@
 # Editor test script — Model tab & building an ontology from scratch
 
-Version 0.6.5.0. Two parts: **A** exercises the Model tab on the real IR
+Version 0.6.6.0. Two parts: **A** exercises the Model tab on the real IR
 ontology; **B** builds a small ontology from nothing and ends by exporting it
 as Turtle. Every step says what you should see — anything different is a bug,
 note it and carry on. The flow mirrors how the IR model itself is structured
