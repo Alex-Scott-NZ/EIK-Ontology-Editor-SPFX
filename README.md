@@ -176,31 +176,52 @@ Verified working:
 - **Database queries** — `npm --prefix tools run verify` smoke-tests the
   queries the web part issues, including the inverse derivation (one stored
   row correctly yields two view rows) and polyhierarchy.
+- **Write layer** — `src/services/database/OntologyWriter.ts` is the single
+  mutation path: concepts, relationships, labels, metadata and classes all go
+  through it, journalled to `changes`, with undo, and it reimplements
+  Semaphore's unique-label-within-class rule. New concepts are minted under
+  `http://example.com/InlandRevenueModel-editor#`.
+- **Turtle exporter + round trip** — `npm run roundtrip` is graph-identical:
+  202,693 triples in, 202,693 out, zero lost, zero fabricated. The web part's
+  "Export Turtle" command uses the same code.
+- **Editing UI** — Tree/List/Detail plus a Model tab (classes, relationship
+  types with inverses, domain/range with link validation), create/rename/delete
+  throughout, and save-to-SharePoint with an unsaved-changes guard.
 - **SPFx build** — `gulp bundle` completes clean, producing
   `dist/ontology-editor-web-part.js`.
+- **Live testing** — dev-server workflow in `docs/LIVE-TESTING.md`, with a CDP
+  browser harness under `tools/browser-harness/`.
 
-Not yet done: any write path, the Turtle exporter, and running the web part
-against a real SharePoint page.
+## Decisions and remaining work
 
-## Before editing goes live
+Settled (2026-08-24), recorded so they survive the next read-through:
 
-- [ ] **Build the Turtle exporter early**, not last — it is the proof the
-      migration is reversible. Then add a round-trip test: original TTL →
-      SQLite → TTL compared as triple sets. Coverage proves nothing is dropped
-      going *in*; only a round trip proves it comes back out.
-- [ ] Reimplement the constraints Semaphore enforced in its UI, especially
-      unique-label-**within-class** (a global rule would reject valid existing
-      data — five labels are legitimately shared across classes).
-- [ ] Decide whether IR keeps running Semaphore's classifier. It determines
-      whether the 16,000+ per-label matching flags are live configuration
-      needing editing UI, or historical record to preserve untouched. Biggest
-      remaining scope question.
-- [ ] Agree a URI-minting rule for new concepts — five namespaces exist today.
-- [ ] Write the write-layer, journalling every change to the `changes` table.
-      Editing must not silently normalise URIs or bulk-default label flags.
-- [ ] Sanitise HTML before rendering notes as markup — Semaphore stores them as
-      HTML fragments and this web part will make them editable. Currently
-      stripped to text.
-- [ ] Decide the concurrency story: a single `.sqlite` has no merge path. Either
-      lock the file or make the change journal the unit of merge.
-- [ ] Snapshot to IndexedDB periodically — an unsaved tab close loses work.
+- **The classifier stops with Semaphore.** The whole suite goes, so the 16,000+
+  per-label matching flags are historical record rather than live
+  configuration. They already round-trip intact and the UI shows/edits them as
+  matching rules, but no further flag UX is required and the export only needs
+  to be valid Turtle — not ingestible by a running classifier.
+- **Notes stay plain text.** Semaphore stored them as HTML fragments (often
+  because they were pasted that way, though Semaphore rendered the HTML). This
+  web part shows them as pasted text and never renders HTML, so no
+  sanitisation layer is needed unless rich-text notes are ever wanted.
+- **Single editor at a time.** The ontology is one `.sqlite` file with no merge
+  path, so only one person may edit at once. The file will need a lock — not
+  yet implemented, so for now this is a process agreement rather than an
+  enforced one.
+- **URI minting** — new concepts are minted under
+  `http://example.com/InlandRevenueModel-editor#` (scratch ontologies use their
+  own namespace), so provenance stays visible.
+
+Still to decide:
+
+- [ ] **Concept schemes** — whether the editor manages the 11 concept schemes'
+      membership or treats them as archival (currently preserved in
+      `passthrough_triples` either way).
+
+Remaining work (decided, not yet built):
+
+- [ ] **Lock the file while editing** — enforce the single-editor decision.
+- [ ] **IndexedDB snapshots** — periodically persist the in-memory database and
+      offer to recover it when the page is reloaded after a crash or forced
+      refresh, so unsaved work is not lost.
