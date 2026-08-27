@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "eik-ontology-editor": "file:..",
-    "sql.js": "^1.13.0"
+    "sql.js": "^1.14.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

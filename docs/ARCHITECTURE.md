@@ -179,9 +179,10 @@ exiting non-zero on failure:
   user skips the download; invalidate when the ETag changes.
 - Snapshot the in-memory DB to IndexedDB periodically — neither storage option gives
   incremental durability, so an unsaved tab close loses work otherwise.
-- Concurrency: a single `.sqlite` file has no merge story. Either take a checkout
-  lock on the library file, or (better) treat the change journal as the unit of
-  merge. **Decide before multi-user editing is enabled.**
+  **DECIDED (2026-08-24):** do it, with a recovery prompt on reload. Not yet built.
+- Concurrency: a single `.sqlite` file has no merge story.
+  **DECIDED (2026-08-24):** single editor at a time — lock the file. Not yet
+  enforced, so for now it is a process agreement.
 - sql.js ships a `.wasm` that must be reachable at runtime — serve it from the
   bundle rather than a CDN, since SharePoint CSP and offline dev both punish
   external fetches.

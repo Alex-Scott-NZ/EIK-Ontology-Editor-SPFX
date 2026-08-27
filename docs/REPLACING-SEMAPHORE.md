@@ -230,22 +230,14 @@ demoting real relationships to opaque triples.
 ## Open, and worth deciding early
 
 - **When Semaphore goes, does anything downstream still consume this model** —
-  document tagging, search, auto-classification? This does **not** affect the
-  data: the matching settings are preserved either way. It affects two other
-  things:
-  1. Whether a label created in the new editor needs its matching settings set.
-     If something still consumes them, a new label with no flags is subtly
-     broken — present in the model but behaving unlike its neighbours. If
-     nothing consumes them, a bare new label is fine and the existing flags are
-     history.
-  2. Whether the export needs to be *ingestible* by a still-running classifier,
-     which is a far stronger constraint than merely being valid Turtle.
-
-  Semaphore is a suite, not one program: the model editor is one part, the
-  classification engine another. "Replacing Semaphore" could mean either just
-  the editor or the whole suite, and the exporter's specification differs
-  completely between those.
-- **Who owns URI minting for new concepts?** Five namespaces exist; new
-  concepts need a rule. Recommend one new namespace for anything created here,
-  so provenance stays visible.
+  document tagging, search, auto-classification? **SETTLED (2026-08-24): the
+  whole suite goes — the classifier stops too.** The matching flags are
+  therefore historical record, not live configuration: a new label with no
+  flags is fine, and the export only needs to be valid Turtle, not ingestible
+  by a running classifier. (The flags still round-trip intact and the editor
+  shows/edits them as matching rules.)
+- **Who owns URI minting for new concepts?** **SETTLED (2026-08-24):** new
+  concepts are minted under `http://example.com/InlandRevenueModel-editor#`
+  (scratch ontologies use their own namespace), so provenance stays visible.
 - **Are concept schemes still meaningful** post-migration, or archival?
+  (Tracked in README "Decisions and remaining work".)
