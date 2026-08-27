@@ -593,8 +593,9 @@
 
 /* ---------------------------------------------------------------- edit -- */
 
-/* Hidden until the row is hovered or something inside it has focus, so the
-   lists stay calm — but always reachable by keyboard. */
+/* Hidden until the row is hovered or something inside it has focus, so browse
+   contexts (tree rows) stay calm — but always reachable by keyboard. In the
+   editable detail pane they instead rest faintly visible; see below. */
 .rowActions {
   display: inline-flex;
   gap: 2px;
@@ -605,28 +606,14 @@
   transition: opacity 0.1s ease-in;
 }
 
-/* In the detail pane the actions sit directly after the row's content and
-   collapse to zero width while hidden — so they never take layout space
-   (which made hidden buttons wrap to an invisible second line on long rows,
-   reading as random extra spacing). (Tree rows keep the in-flow version:
-   they never wrap, and the label truncates.) */
+/* In the detail pane the actions sit directly after the row's content. They
+   only render in edit mode there, where they rest faintly visible (below),
+   so they may take layout space. (Tree rows never wrap; the label truncates.) */
 .labelRow .rowActions,
 .linkRow .rowActions,
 .metadataName .rowActions {
   margin-left: 2px;
   padding-left: 0;
-  max-width: 0;
-  overflow: hidden;
-}
-
-.labelRow:hover .rowActions,
-.labelRow:focus-within .rowActions,
-.linkRow:hover .rowActions,
-.linkRow:focus-within .rowActions,
-.metadataName:hover .rowActions,
-.metadataName:focus-within .rowActions {
-  max-width: 80px;
-  overflow: visible;
 }
 
 /* Editable rows announce themselves on hover (edit mode only — the class is
@@ -647,14 +634,24 @@
   background: "[theme:neutralLighter, default:#f3f2f1]";
 }
 
+/* In edit mode the actions rest faintly visible instead of hidden — fully
+   hidden icons made existing values read as read-only (a tester filed exactly
+   that). Hovering anywhere on the row (below) brings them to full strength. */
+.detailEditable .rowActions {
+  opacity: 0.35;
+  pointer-events: auto;
+}
+
+/* The whole field is the hover target — for metadata especially, the value
+   text is where people point when they want to change it, not the name line. */
 .treeRow:hover .rowActions,
 .treeRow:focus-within .rowActions,
 .labelRow:hover .rowActions,
 .labelRow:focus-within .rowActions,
 .linkRow:hover .rowActions,
 .linkRow:focus-within .rowActions,
-.metadataName:hover .rowActions,
-.metadataName:focus-within .rowActions,
+.metadataField:hover .rowActions,
+.metadataField:focus-within .rowActions,
 .detailTitle:hover .rowActions,
 .detailTitle:focus-within .rowActions {
   opacity: 1;
