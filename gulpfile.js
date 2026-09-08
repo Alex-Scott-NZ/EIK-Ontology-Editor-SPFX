@@ -10,6 +10,15 @@ build.addSuppression(
 // and must never be pulled into the SPFx bundle.
 build.tslintCmd.enabled = false;
 
+// No eslint during `gulp serve`: the type-aware lint builds a SECOND full
+// TypeScript program and, overlapping tsc and webpack on a busy machine, has
+// twice driven the serve process to "JavaScript heap out of memory" (filled
+// an 8 GB heap, 2026-09-11). The IDE lints live and `gulp bundle` /
+// `gulp bundle --ship` still run the full lint.
+if (process.argv.indexOf('serve') !== -1) {
+  build.lintCmd.enabled = false;
+}
+
 /**
  * Inline sql.js's WebAssembly binary into the bundle as a data URI.
  *
