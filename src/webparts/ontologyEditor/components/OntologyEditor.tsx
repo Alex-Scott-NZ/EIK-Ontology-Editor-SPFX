@@ -302,11 +302,12 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       await fileService.ensureFolder(effectiveFolder);
       await fileService.writeFile(effectiveFolder, name || fileName, db.export());
       if (writer) { writer.markClean(); setSavedChanges(writer.getChangeCount()); }
-      // The library copy is now current — Revert reloads it from here on.
-      setRevertSource({
-        kind: 'sqlite-library',
-        path: `${effectiveFolder.replace(/\/$/, '')}/${name || fileName}`
-      });
+      // The library copy is now current — Revert reloads it from here on,
+      // and the status strip names the saved file rather than the original
+      // source (a fresh ontology otherwise reads "(unsaved)" forever).
+      const savedPath = `${effectiveFolder.replace(/\/$/, '')}/${name || fileName}`;
+      setRevertSource({ kind: 'sqlite-library', path: savedPath });
+      setSourceLabel(savedPath);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -23,46 +23,110 @@ const Expect: React.FC = ({ children }) => (
   <p className={styles.walkthroughExpect}>Expect: {children}</p>
 );
 
+function copyText(text: string): void {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      void navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch { /* fall through */ }
+  // Fallback for contexts where the async clipboard API is unavailable.
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch { /* nothing else to try */ }
+  document.body.removeChild(ta);
+}
+
+/** A value to type into the editor — click to copy it, paste it in. */
+const Copy: React.FC<{ t: string }> = ({ t }) => {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <button
+      type="button"
+      className={styles.walkthroughCopy}
+      title={copied ? 'Copied!' : 'Click to copy'}
+      onClick={() => {
+        copyText(t);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      <span>{t}</span>
+      <Icon iconName={copied ? 'CheckMark' : 'Copy'} />
+    </button>
+  );
+};
+
+/** A colour: the swatch to recognise it by, the hex to paste into the Colour box. */
+const Colour: React.FC<{ c: string }> = ({ c }) => (
+  <>
+    <Swatch c={c} />
+    <Copy t={c} />
+  </>
+);
+
 const STEPS: IStep[] = [
   {
     key: 'b1', title: 'Start a new ontology',
     body: <>
-      <p><b>Open… → Start a new ontology → Create a new ontology.</b></p>
-      <Expect>an empty editor — 0 concepts, empty tree. Status strip shows
-        “New ontology (unsaved)”.</Expect>
-      <p>The build order matters and the UI teaches it:
-        classes → relationship types → concepts → links.</p>
+      <p>Values in boxes like <Copy t="example" /> can be clicked to copy,
+        then pasted into the editor — no retyping.</p>
+      <p>On the opening screen, choose <b>Create a new ontology</b> (under
+        “Start a new ontology”). If an ontology is already open, use
+        <b> Open…</b> in the command bar to get back to that screen first.</p>
+      <Expect>an empty editor — 0 concepts, an empty tree. The status strip
+        reads “New ontology (unsaved)”.</Expect>
+      <p>The build order matters, and the editor teaches it:
+        classes → relationship types → concepts → links. Everything lives in
+        this browser tab until you Save.</p>
     </>
   },
   {
     key: 'b2', title: 'Classes (Model tab)',
     body: <>
-      <p>Model tab → <b>+</b> on the Concept classes card. Create:</p>
+      <p>A class says what KIND of thing a concept is, and (later) which
+        relationships it may take. Switch to the <b>Model</b> tab →
+        <b> +</b> on the <b>Concept classes</b> card. Create these four —
+        name, colour, parent, definition:</p>
       <table className={styles.walkthroughTable}>
         <tbody>
-          <tr><td><Swatch c="#e0a3a3" /> Party</td><td>top level</td><td>A person or organisation</td></tr>
-          <tr><td><Swatch c="#c98080" /> Organisation</td><td>parent: Party</td><td>A group acting as one party</td></tr>
-          <tr><td><Swatch c="#a3c1e0" /> Activity</td><td>top level</td><td>Something a party does</td></tr>
-          <tr><td><Swatch c="#a3e0b8" /> Document</td><td>top level</td><td>Recorded information</td></tr>
+          <tr><td><Copy t="Party" /></td><td><Colour c="#e0a3a3" /></td>
+            <td>top level</td><td><Copy t="A person or organisation" /></td></tr>
+          <tr><td><Copy t="Organisation" /></td><td><Colour c="#c98080" /></td>
+            <td>parent: Party</td><td><Copy t="A group acting as one party" /></td></tr>
+          <tr><td><Copy t="Activity" /></td><td><Colour c="#a3c1e0" /></td>
+            <td>top level</td><td><Copy t="Something a party does" /></td></tr>
+          <tr><td><Copy t="Document" /></td><td><Colour c="#a3e0b8" /></td>
+            <td>top level</td><td><Copy t="Recorded information" /></td></tr>
         </tbody>
       </table>
-      <Expect>4 rows with swatches; Organisation’s parent reads Party.</Expect>
-      <p>Also try creating another class called <b>Party</b> — it should be
-        refused as a duplicate name.</p>
+      <Expect>4 rows with colour swatches; Organisation’s parent reads
+        Party.</Expect>
+      <p>Also try creating another class called <b>Party</b> — it is refused
+        as a duplicate name.</p>
     </>
   },
   {
     key: 'b3', title: 'Relationship types',
     body: <>
-      <p><b>+</b> on the Relationship types card. Create:</p>
+      <p>Relationship types are defined once, as a forward/inverse pair with
+        a source class (domain) and target class (range).
+        <b> +</b> on the <b>Relationship types</b> card. Create:</p>
       <table className={styles.walkthroughTable}>
         <tbody>
-          <tr><td>Performs</td><td>Is performed by</td><td>Party → Activity</td></tr>
-          <tr><td>Produces</td><td>Is produced by</td><td>Activity → Document</td></tr>
-          <tr><td>Mentions</td><td>Is mentioned in</td><td>Document → Any concept</td></tr>
+          <tr><td><Copy t="Performs" /></td><td><Copy t="Is performed by" /></td>
+            <td>Party → Activity</td></tr>
+          <tr><td><Copy t="Produces" /></td><td><Copy t="Is produced by" /></td>
+            <td>Activity → Document</td></tr>
+          <tr><td><Copy t="Mentions" /></td><td><Copy t="Is mentioned in" /></td>
+            <td>Document → Any concept</td></tr>
         </tbody>
       </table>
-      <Expect>3 pair rows. The preview line in the dialog reads sensibly
+      <Expect>3 pair rows. The preview sentence in the dialog reads sensibly
         before you hit Create — that’s the domain/range talking.</Expect>
     </>
   },
@@ -71,113 +135,141 @@ const STEPS: IStep[] = [
     body: <>
       <p>Still on the Model tab:</p>
       <ul>
-        <li>New metadata field → <b>Risk rating</b>, applies to
-          <b> Activity</b>, definition “How risky this activity is.”</li>
-        <li>New label type → <b>Acronym</b>, applies to <b>Any concept</b>.</li>
+        <li>New metadata field → <Copy t="Risk rating" />, applies to
+          <b> Activity</b>, definition <Copy t="How risky this activity is." /></li>
+        <li>New label type → <Copy t="Acronym" />, applies to
+          <b> Any concept</b>.</li>
       </ul>
       <Expect>one row in each table, Uses = 0. Creating a field called
-        “Performs” is refused — names are unique across types and fields.</Expect>
+        “Performs” is refused — names are unique across types and
+        fields.</Expect>
     </>
   },
   {
     key: 'b4', title: 'Concepts',
     body: <>
-      <p><b>Top-level</b> — the empty tree shows a dashed
-        “+ Add the first concept” row; click it. Create:</p>
+      <p>Back on the <b>Concepts</b> tab. The empty tree shows a dashed
+        “+ Add the first concept” row; click it (after the first concept it
+        becomes “+ New top concept”). Create three at top level:</p>
       <ul>
-        <li><b>ACME Ltd</b> — class Organisation</li>
-        <li><b>Tax filing</b> — class Activity</li>
-        <li><b>Filing guide</b> — class Document</li>
+        <li><Copy t="ACME Ltd" /> — class Organisation</li>
+        <li><Copy t="Tax filing" /> — class Activity</li>
+        <li><Copy t="Filing guide" /> — class Document</li>
       </ul>
-      <p><b>As a child</b> — hover Tax filing in the tree, click the
-        add-child <b>+</b> on the row. Create <b>Annual return</b>; the class
-        comes pre-set to Activity (children default to their parent’s class).</p>
-      <Expect>three at top level, Annual return nested under Tax filing,
-        class colours on the tree nodes.</Expect>
+      <p><b>As a child</b> — hover Tax filing in the tree and click the small
+        green <b>+</b> that appears on the row. Create
+        <Copy t="Annual return" />; the class comes pre-set to Activity
+        (children default to their parent’s class).</p>
+      <Expect>three at top level, Annual return nested under Tax filing
+        (click the chevron to expand), class colours on the tree
+        rows.</Expect>
     </>
   },
   {
     key: 'b4b', title: 'Change a class after the fact',
     body: <>
-      <p>Select Annual return → pencil next to the class chip → change to
-        <b> Document</b> → try Add relationship.</p>
-      <Expect>only Mentions is offered now, not Performs/Produces.</Expect>
-      <p>Change it back to <b>Activity</b>. That’s the class doing its job: it
-        governs the relationship picker, independent of tree position.</p>
+      <p>Select Annual return. In the detail pane, every editable row shows
+        faint pencil/bin icons that sharpen on hover — that’s how all editing
+        works here. Click the pencil next to the class chip → change to
+        <b> Document</b> → then try <b>+</b> on Related Concepts.</p>
+      <Expect>Performs and Produces are gone from the picker — a Document
+        can’t perform or produce. What remains is what a Document CAN do:
+        Mentions, plus inverse directions like “Is produced by”.</Expect>
+      <p>Change it back to <b>Activity</b>. That’s the class doing its job:
+        it governs which relationships are offered, independent of tree
+        position.</p>
     </>
   },
   {
     key: 'b5', title: 'Second parent (polyhierarchy)',
     body: <>
-      <p>Annual return → add broader → pick <b>ACME Ltd</b> (nonsense
-        semantically, but it proves the mechanics).</p>
-      <Expect>Annual return now appears under BOTH Tax filing and ACME Ltd.</Expect>
-      <p>Remove the ACME parent again afterwards.</p>
+      <p>With Annual return selected → <b>+</b> on <b>Broader Concepts</b> →
+        pick <b>ACME Ltd</b> (nonsense semantically, but it proves the
+        mechanics — a concept may sit under several branches at once).</p>
+      <Expect>Annual return now appears under BOTH Tax filing and ACME
+        Ltd.</Expect>
+      <p>Remove the ACME parent again: hover that row under Broader Concepts
+        and click its bin icon.</p>
     </>
   },
   {
     key: 'b6', title: 'Links',
     body: <>
+      <p>Select each source concept, then <b>+</b> on
+        <b> Related Concepts</b>:</p>
       <ul>
-        <li>ACME Ltd → Add relationship → <b>Performs</b> → Tax filing.
-          (Organisation is a <i>subclass</i> of Party — the type must still be
-          offered. If not, that’s a bug in class inheritance.)</li>
+        <li>ACME Ltd → <b>Performs</b> → Tax filing. (Organisation is a
+          <i> subclass</i> of Party, so the type is still offered — that’s
+          class inheritance working.)</li>
         <li>Tax filing → <b>Produces</b> → Filing guide.</li>
-        <li>Filing guide → <b>Mentions</b> → anything (“Any” range means every
-          concept is offered).</li>
+        <li>Filing guide → <b>Mentions</b> → anything (“Any concept” range
+          means everything is offered).</li>
       </ul>
-      <Expect>each link readable from both ends under the inverse name;
-        wrong-direction pairings (e.g. Performs from Filing guide) not
-        offered.</Expect>
+      <Expect>each link readable from both ends under the inverse name
+        (Tax filing shows “Is performed by → ACME Ltd”); wrong-direction
+        pairings (e.g. Performs from Filing guide) are not offered.</Expect>
     </>
   },
   {
     key: 'b7', title: 'Labels with matching flags',
     body: <>
-      <p>ACME Ltd → add a label → the Role dropdown now offers
-        <b> Acronym</b> (from the earlier step) as well as Alternative label.
-        Add <b>ACME</b> as an Acronym → Case sensitivity
-        <b> Case sensitive</b>, Stemming <b>Off</b>.</p>
-      <Expect>flag chips on the label, and Uses = 1 on the Acronym row back
-        on the Model tab.</Expect>
+      <p>ACME Ltd → <b>+</b> on <b>Alternative Labels</b> → the Role dropdown
+        offers <b>Acronym</b> (from step 4) as well as Alternative label.
+        Add <Copy t="ACME" /> as an Acronym, and set Case sensitivity to
+        <b> On</b> and Stemming to <b>Off</b>.</p>
+      <Expect>a “2 settings” chip on the label row, and Uses = 1 on the
+        Acronym row back on the Model tab.</Expect>
     </>
   },
   {
     key: 'b8', title: 'Metadata',
     body: <>
-      <p>Tax filing → <b>+</b> on the Metadata card → the Field box (type to
-        filter) offers <b>Risk rating</b> — because Tax filing is an Activity.
-        Check it is NOT offered on ACME Ltd or Filing guide. Set it to
-        “High”.</p>
-      <p>Also add a standard one: ACME Ltd → definition → “A test
-        organisation.”</p>
-      <p>Then hover a metadata row: the pencil edits the value in place, the
-        bin deletes it. Edit one to prove the round trip.</p>
+      <p>Tax filing → <b>+</b> on the <b>Metadata</b> card → the Field box
+        (type to filter) offers <b>Risk rating</b> — because Tax filing is an
+        Activity. Set it to <Copy t="High" />. Check the field is NOT offered
+        on ACME Ltd or Filing guide.</p>
+      <p>Also add a standard one: ACME Ltd → Metadata <b>+</b> →
+        definition → <Copy t="A test organisation." /></p>
+      <p>Hover anywhere over a metadata field: the pencil edits the value,
+        the bin deletes it. Edit one to prove the round trip.</p>
+    </>
+  },
+  {
+    key: 'b8b', title: 'Undo',
+    body: <>
+      <p>Command bar → <b>Undo</b>.</p>
+      <Expect>the last edit steps back (repeat to go further; it stops at
+        the last save). There is no redo — if you step back too far,
+        re-apply the change by hand.</Expect>
+      <p>Every change is also journalled with author and timestamp — the
+        audit trail travels inside the saved file.</p>
     </>
   },
   {
     key: 'b9', title: 'Save and reopen',
     body: <>
       <p><b>Save</b> (command bar).</p>
-      <Expect>no setup needed — it creates Shared Documents/Ontology on the
+      <Expect>no setup needed — it creates Shared Documents/Ontology on this
         site, writes ontology.sqlite there, and the red “● unsaved changes”
         badge clears.</Expect>
       <p>Then <b>Open…</b> → the picker auto-lists that folder → open the
-        file.</p>
-      <Expect>all of it back — and deleting Tax filing warns it takes 1 child
-        + 2 relationships with it. Cancel.</Expect>
+        file again.</p>
+      <Expect>everything back as it was. Bonus check: hover Tax filing in
+        the tree and click its bin — the delete warning itemises everything
+        it would take with it: the child concept, relationships, labels and
+        metadata. Cancel.</Expect>
     </>
   },
   {
     key: 'b10', title: 'Export Turtle',
     body: <>
       <p>Command bar → <b>Export Turtle…</b></p>
-      <Expect>an .ttl downloads immediately (it serialises what you’re
-        looking at, unsaved changes included). Open it in a text editor: your
-        classes as owl:Class blocks, the relationship pairs with
+      <Expect>a .ttl downloads immediately (it serialises what you’re
+        looking at, unsaved changes included). Open it in a text editor:
+        your classes as owl:Class blocks, the relationship pairs with
         domain/range/inverseOf, every link written in BOTH directions,
-        concepts with skos:broader, SKOS-XL labels with their matching flags,
-        and Risk rating as a typed annotation.</Expect>
+        concepts with skos:broader, SKOS-XL labels with their matching
+        flags, and Risk rating as a typed annotation.</Expect>
     </>
   },
   {
@@ -189,6 +281,39 @@ const STEPS: IStep[] = [
         before the export — classes, relationship-type pairs, concepts,
         links, labels, metadata. That file is Semaphore-compatible: this is
         the eventual production export path.</Expect>
+    </>
+  },
+  {
+    key: 'b12', title: 'Export a branch as its own ontology',
+    body: <>
+      <p>Select <b>Tax filing</b>. Next to its name at the top of the detail
+        pane are three icons: rename, <b>export branch</b>, and
+        <b> attach ontology</b>. Click the export icon.</p>
+      <Expect>the dialog counts the branch — “Tax filing” and everything
+        narrower, 2 concepts. It keeps the full class/relationship-type
+        schema, so the subset is a complete, openable ontology on its
+        own.</Expect>
+      <p>Keep the suggested name, tick <b>Turtle</b>, and choose
+        <b> Save to SharePoint</b>.</p>
+      <Expect>a green bar confirms the file landed in the ontology
+        folder.</Expect>
+    </>
+  },
+  {
+    key: 'b13', title: 'Attach an ontology under a concept',
+    body: <>
+      <p>Now graft that branch somewhere else. Select <b>Filing guide</b> →
+        click the <b>attach ontology</b> icon next to its name → the dialog
+        lists the ontology folder → <b>Attach</b> on the file you just
+        exported.</p>
+      <Expect>a green bar reports what happened: concepts whose URIs already
+        exist are REUSED, not duplicated — so here the branch’s top concept
+        simply gains Filing guide as a second parent. Attaching a file from
+        a different ontology would add its concepts, classes and
+        relationship types wholesale.</Expect>
+      <p><b>Undo</b> reverses the entire attach in one step. Do that now —
+        and that’s the tour. Delete the practice files from
+        Shared Documents/Ontology if you’re done with them.</p>
     </>
   }
 ];

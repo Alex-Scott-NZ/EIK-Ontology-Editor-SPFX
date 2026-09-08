@@ -19,7 +19,7 @@
 import { Database } from 'sql.js';
 import {
   SKOSXL_PREF_LABEL, SKOS_BROADER, RDF_TYPE, RDFS_LABEL,
-  OWL_OBJECT_PROPERTY, OWL_CLASS, SKOS_DEFINITION
+  OWL_OBJECT_PROPERTY, OWL_CLASS, SKOS_DEFINITION, RDFS_RANGE, SKOSXL_LABEL
 } from '../turtle/Vocabulary';
 
 /** Namespace for concepts created in this editor, so provenance stays visible. */
@@ -963,6 +963,11 @@ export class OntologyWriter {
     const flags = JSON.stringify({
       [RDF_TYPE]: [{ v: rdfType, t: 'i' }],
       [RDFS_LABEL]: [{ v: label, t: 'l', lang: 'en' }],
+      // rdfs:range skosxl:Label is what marks a label type on re-import —
+      // without it a round-tripped Acronym demotes to a relationship type.
+      ...(isLabelProperty
+        ? { [RDFS_RANGE]: [{ v: SKOSXL_LABEL, t: 'i' }] }
+        : {}),
       ...(options.definition
         ? { [SKOS_DEFINITION]: [{ v: options.definition, t: 'l', lang: 'en' }] }
         : {})

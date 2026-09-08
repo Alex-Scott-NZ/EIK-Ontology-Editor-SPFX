@@ -720,12 +720,20 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
         options.push({ key: uri, text });
       }
     }
+    // DEFINED predicates are governed by their domain (handled above) — the
+    // in-use fallback must not resurrect one on a concept outside that domain.
+    const defined: { [uri: string]: true } = {};
+    const defRows = db.raw.exec('SELECT uri FROM properties');
+    if (defRows.length) {
+      for (const r of defRows[0].values) defined[String(r[0])] = true;
+    }
     const rows = db.raw.exec(
       `SELECT predicate_uri, COUNT(*) n FROM annotations GROUP BY 1 ORDER BY n DESC LIMIT 40`
     );
     if (rows.length) {
       for (const r of rows[0].values) {
         const uri = String(r[0]);
+        if (defined[uri]) continue;
         if (!seen[uri]) { seen[uri] = true; options.push({ key: uri, text: localName(uri) }); }
       }
     }

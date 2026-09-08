@@ -997,6 +997,33 @@
   margin-right: 4px;
 }
 
+/* Click-to-copy chip for values the walkthrough asks you to type. */
+.walkthroughCopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 5px;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 3px;
+  background: "[theme:neutralLighterAlt, default:#faf9f8]";
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+
+  i {
+    font-size: 10px;
+    color: "[theme:themePrimary, default:#0078d4]";
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background: "[theme:neutralLighter, default:#f3f2f1]";
+    border-color: "[theme:themePrimary, default:#0078d4]";
+  }
+}
+
 .walkthroughResize {
   position: absolute;
   right: 0;
