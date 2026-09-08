@@ -3,7 +3,7 @@ import {
   SearchBox, Spinner, SpinnerSize, MessageBar, MessageBarType,
   CommandBar, ICommandBarItemProps, Pivot, PivotItem, Icon, ActionButton
 } from '@fluentui/react';
-import { SqlJsStatic } from 'sql.js';
+import { Database, SqlJsStatic } from 'sql.js';
 
 import styles from './OntologyEditor.module.scss';
 import { IOntologyEditorProps } from './IOntologyEditorProps';
@@ -17,7 +17,7 @@ import { WalkthroughPanel } from './WalkthroughPanel';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { exportTurtle } from '../../../services/export/TurtleExporter';
 import { getSqlJs } from '../../../services/database/sqlJsLoader';
-import { OntologyWriter, ValidationFailure, ILabelFlagEdit } from '../../../services/database/OntologyWriter';
+import { OntologyWriter, ValidationFailure, ILabelFlagEdit, IAttachStats } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
 import {
   FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes,
@@ -28,7 +28,7 @@ import { IConceptEditHandlers } from './ConceptDetail';
 import {
   NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
   RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog, ChangeClassDialog,
-  SaveAsDialog
+  SaveAsDialog, ExportBranchDialog, AttachOntologyDialog
 } from './ConceptDialogs';
 import { localName } from '../../../services/turtle/Vocabulary';
 
@@ -49,6 +49,8 @@ type DialogState =
   | { kind: 'editAnnotation'; annotation: IAnnotation }
   | { kind: 'confirmDelete'; node: ITreeNode; impact: string }
   | { kind: 'saveAs' }
+  | { kind: 'exportBranch' }
+  | { kind: 'attachOntology' }
   | { kind: 'confirm'; title: string; message: string; act: () => void };
 
 type Stage = 'choosing' | 'working' | 'ready';
@@ -104,6 +106,11 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   // In-place operations (save, revert) show this over the workspace instead
   // of unmounting it into the full-screen loading state.
   const [busy, setBusy] = React.useState<string | undefined>(undefined);
+  // Success confirmations (branch exported, ontology attached) — the warning
+  // bar above is the wrong tone for good news.
+  const [notice, setNotice] = React.useState<string | undefined>(undefined);
+  // Progress text shown INSIDE the attach dialog while its source loads/merges.
+  const [attachBusy, setAttachBusy] = React.useState<string | undefined>(undefined);
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
   const [dialogError, setDialogError] = React.useState<string | undefined>(undefined);
   // Views memoise their queries; bumping this refetches after a mutation.
@@ -342,6 +349,127 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     setDialog({ kind: 'none' });
     setDialogError(undefined);
   }, []);
+  /**
+   * Export the selected concept's branch as a standalone ontology. The .ttl is
+   * serialised straight from the filtered exporter; the .sqlite flavour is that
+   * same Turtle fed back through the importer — one serialisation code path.
+   */
+  const exportBranch = React.useCallback(async (
+    baseName: string,
+    formats: { ttl: boolean; sqlite: boolean },
+    dest: 'download' | 'library'
+  ): Promise<void> => {
+    if (!db || selectedId === undefined) return;
+    setBusy('Exporting branch…');
+    try {
+      setDialogError(undefined);
+      await yieldToBrowser();
+      const ids = db.getDescendantIds(selectedId);
+      const { ttl, stats } = exportTurtle(db.raw, { conceptIds: ids });
+      const ttlBytes = new TextEncoder().encode(ttl);
+
+      let sqliteBytes: Uint8Array | undefined;
+      if (formats.sqlite) {
+        setBusy('Building the .sqlite…');
+        await yieldToBrowser();
+        const SQL: SqlJsStatic = await getSqlJs();
+        const built = importTurtle(ttl, SQL, {
+          sourceName: `${baseName}.ttl (branch export)`, sourceBytes: ttlBytes.length
+        });
+        sqliteBytes = built.database.export();
+        built.database.close();
+      }
+
+      const names: string[] = [];
+      if (dest === 'library' && fileService && effectiveFolder) {
+        setBusy('Saving to SharePoint…');
+        await fileService.ensureFolder(effectiveFolder);
+        if (formats.ttl) { await fileService.writeFile(effectiveFolder, `${baseName}.ttl`, ttlBytes); names.push(`${baseName}.ttl`); }
+        if (sqliteBytes) { await fileService.writeFile(effectiveFolder, `${baseName}.sqlite`, sqliteBytes); names.push(`${baseName}.sqlite`); }
+        setNotice(`Exported ${stats.concepts.toLocaleString()} concepts and ` +
+          `${stats.relationshipTriples.toLocaleString()} relationship triples to ` +
+          `${effectiveFolder}/${names.join(' and ')}.`);
+      } else {
+        if (formats.ttl) { downloadBytes(ttlBytes, `${baseName}.ttl`); names.push(`${baseName}.ttl`); }
+        if (sqliteBytes) { downloadBytes(sqliteBytes, `${baseName}.sqlite`); names.push(`${baseName}.sqlite`); }
+        setNotice(`Downloaded ${names.join(' and ')} — ${stats.concepts.toLocaleString()} concepts.`);
+      }
+      closeDialog();
+    } catch (e) {
+      setDialogError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [db, selectedId, fileService, effectiveFolder, closeDialog]);
+
+  /** Load a .ttl/.sqlite source and graft it under the selected concept. */
+  const attachFrom = React.useCallback(async (choice: { file?: File; path?: string }): Promise<void> => {
+    if (!db || !writer || selectedId === undefined) return;
+    const isTtl = (n: string): boolean => /\.(ttl|turtle)$/i.test(n);
+    try {
+      setDialogError(undefined);
+      let sourceDb: Database;
+      if (choice.file) {
+        if (isTtl(choice.file.name)) {
+          setAttachBusy('Parsing Turtle… (the tab may pause)');
+          await yieldToBrowser();
+          const SQL: SqlJsStatic = await getSqlJs();
+          sourceDb = importTurtle(await readLocalFileAsText(choice.file), SQL,
+            { sourceName: choice.file.name }).database;
+        } else {
+          setAttachBusy('Opening database…');
+          await yieldToBrowser();
+          const bytes = await readLocalFileAsArrayBuffer(choice.file);
+          const SQL: SqlJsStatic = await getSqlJs();
+          sourceDb = new SQL.Database(new Uint8Array(bytes));
+        }
+      } else if (choice.path && fileService) {
+        if (isTtl(choice.path)) {
+          setAttachBusy('Downloading Turtle…');
+          await yieldToBrowser();
+          const text = await fileService.readText(choice.path);
+          setAttachBusy('Parsing Turtle… (the tab may pause)');
+          await yieldToBrowser();
+          const SQL: SqlJsStatic = await getSqlJs();
+          sourceDb = importTurtle(text, SQL, { sourceName: choice.path }).database;
+        } else {
+          setAttachBusy('Downloading database…');
+          await yieldToBrowser();
+          const bytes = await fileService.readFile(choice.path);
+          const SQL: SqlJsStatic = await getSqlJs();
+          sourceDb = new SQL.Database(new Uint8Array(bytes));
+        }
+      } else {
+        return;
+      }
+
+      setAttachBusy('Attaching…');
+      await yieldToBrowser();
+      let stats: IAttachStats | undefined;
+      const ok = mutate(() => { stats = writer.attachDatabase(selectedId, sourceDb); });
+      sourceDb.close();
+      if (ok && stats) {
+        const target = db.getConcept(selectedId);
+        closeDialog();
+        setNotice(
+          `Attached under "${(target && target.prefLabel) || 'the selected concept'}": ` +
+          `${stats.conceptsAdded.toLocaleString()} new concept${stats.conceptsAdded === 1 ? '' : 's'} ` +
+          `(${stats.conceptsReused.toLocaleString()} already existed and were reused), ` +
+          `${stats.rootsAttached} top concept${stats.rootsAttached === 1 ? '' : 's'} attached, ` +
+          `${stats.relationshipsAdded.toLocaleString()} relationships, ` +
+          `${stats.classesAdded} new class${stats.classesAdded === 1 ? '' : 'es'}, ` +
+          `${stats.propertiesAdded} new relationship type${stats.propertiesAdded === 1 ? '' : 's'}. ` +
+          'Undo reverses the whole attach.'
+        );
+        setRevealPath(db.getAncestorPath(selectedId));
+      }
+    } catch (e) {
+      setDialogError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttachBusy(undefined);
+    }
+  }, [db, writer, selectedId, fileService, mutate, closeDialog]);
+
 
   const editHandlers: IConceptEditHandlers | undefined = React.useMemo(() => {
     if (!db || !writer || selectedId === undefined) return undefined;
@@ -378,6 +506,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         const parent = db.getConcept(selectedId);
         setDialog({ kind: 'newConcept', parent });
       },
+      onExportBranch: () => setDialog({ kind: 'exportBranch' }),
+      onAttachOntology: () => setDialog({ kind: 'attachOntology' }),
       onAddAnnotation: () => setDialog({ kind: 'addAnnotation' }),
       onEditAnnotation: (annotation) => setDialog({ kind: 'editAnnotation', annotation }),
       onDeleteAnnotation: (annotation) => setDialog({
@@ -563,6 +693,11 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
           {error}
         </MessageBar>
       )}
+      {notice && (
+        <MessageBar messageBarType={MessageBarType.success} onDismiss={() => setNotice(undefined)}>
+          {notice}
+        </MessageBar>
+      )}
 
       <CommandBar items={commands} farItems={farCommands} className={styles.commandBar} />
       {walkthroughOpen && <WalkthroughPanel onClose={() => setWalkthroughOpen(false)} />}
@@ -744,6 +879,43 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             onSaveToSharePoint={(name) => { closeDialog(); void saveToLibrary(name); }}
           />
         );
+
+      case 'exportBranch': {
+        const current = db.getConcept(selectedId as number);
+        const count = Object.keys(db.getDescendantIds(selectedId as number)).length;
+        const base = ((current && current.prefLabel) || 'branch')
+          .replace(/[\\/:*?"<>|]/g, '-').trim() || 'branch';
+        return (
+          <ExportBranchDialog
+            conceptLabel={(current && current.prefLabel) || ''}
+            conceptCount={count}
+            initialName={base}
+            canSaveToSharePoint={!!fileService}
+            folderPath={effectiveFolder || undefined}
+            error={dialogError}
+            onCancel={closeDialog}
+            onExport={(name, formats, dest) => { void exportBranch(name, formats, dest); }}
+          />
+        );
+      }
+
+      case 'attachOntology': {
+        const current = db.getConcept(selectedId as number);
+        return (
+          <AttachOntologyDialog
+            targetLabel={(current && current.prefLabel) || ''}
+            listLibraryFiles={
+              fileService && effectiveFolder
+                ? () => fileService.listFiles(effectiveFolder, ['.ttl', '.sqlite'])
+                : undefined
+            }
+            error={dialogError}
+            busy={attachBusy}
+            onCancel={closeDialog}
+            onAttach={(choice) => { void attachFrom(choice); }}
+          />
+        );
+      }
 
       case 'changeClass': {
         const current = db.getConcept(selectedId as number);

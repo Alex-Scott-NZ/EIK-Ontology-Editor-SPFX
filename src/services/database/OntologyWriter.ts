@@ -44,6 +44,20 @@ export interface ILabelFlagEdit {
   [predicateUri: string]: string | undefined;
 }
 
+/** What attachDatabase did, for the confirmation message and the journal. */
+export interface IAttachStats {
+  conceptsAdded: number;
+  conceptsReused: number;
+  rootsAttached: number;
+  broaderEdges: number;
+  relationshipsAdded: number;
+  labelsAdded: number;
+  annotationsAdded: number;
+  classesAdded: number;
+  propertiesAdded: number;
+  passthroughAdded: number;
+}
+
 function uuid(): string {
   const c = (typeof crypto !== 'undefined' ? crypto : undefined) as
     { randomUUID?: () => string } | undefined;
@@ -1074,6 +1088,234 @@ export class OntologyWriter {
     this._run('DELETE FROM annotations WHERE id = ?', [annotationId]);
     this._journal('delete', 'annotation', before ? this._conceptUri(Number(before[2])) : undefined,
       before ? { predicateUri: before[1], value: before[0] } : {});
+  }
+
+  // -- attaching another ontology --------------------------------------------
+
+  /**
+   * Graft another ontology (a Database opened from .sqlite, or built from .ttl
+   * by the importer) underneath `targetConceptId`.
+   *
+   * Identity is the URI throughout. Schema entities (classes, properties,
+   * prefixes) merge by URI: existing rows are reused untouched, missing ones
+   * are inserted with their structure remapped. Concepts with a URI already in
+   * this database are REUSED — their labels, metadata and hierarchy are left
+   * exactly as they are — while unknown URIs are inserted complete with labels,
+   * annotations, hierarchy edges and relationships. The source's top concepts
+   * (no skos:broader of their own) each gain a broader edge to the target,
+   * unless that would create a cycle.
+   *
+   * Runs inside the caller's savepoint (mutate → beginUndoPoint), so the whole
+   * attach is one undoable unit, journalled as one change.
+   */
+  public attachDatabase(targetConceptId: number, source: Database): IAttachStats {
+    const targetUri = this._conceptUri(targetConceptId);
+    if (!targetUri) {
+      throw new ValidationFailure([{ field: 'target', message: 'The attach-point concept was not found.' }]);
+    }
+
+    const srcRows = (sql: string): unknown[][] => {
+      const r = source.exec(sql);
+      return r.length ? r[0].values as unknown[][] : [];
+    };
+
+    const srcConcepts = srcRows('SELECT id, uri, guid, class_id, pref_label FROM concepts');
+    if (!srcConcepts.length) {
+      throw new ValidationFailure([{ field: 'source', message: 'The selected ontology contains no concepts.' }]);
+    }
+
+    for (const [p, u] of srcRows('SELECT prefix, uri FROM prefixes')) {
+      this._run('INSERT OR IGNORE INTO prefixes (prefix, uri) VALUES (?, ?)', [p, u]);
+    }
+
+    // -- classes, merged by URI; parents linked only for newly-added rows ----
+    const classMap: { [srcId: number]: number } = {};
+    const newClassParents: Array<[number, number]> = [];
+    let classesAdded = 0;
+    for (const [id, uri, label, def, parentId, flags] of srcRows(
+      'SELECT id, uri, label, definition, parent_class_id, flags_json FROM classes'
+    )) {
+      const existing = this._one('SELECT id FROM classes WHERE uri = ?', [uri]);
+      if (existing !== undefined && existing !== null) {
+        classMap[Number(id)] = Number(existing);
+        continue;
+      }
+      this._run('INSERT INTO classes (uri, label, definition, flags_json) VALUES (?, ?, ?, ?)',
+        [uri, label, def, flags]);
+      classMap[Number(id)] = this._lastId();
+      classesAdded++;
+      if (parentId !== null) newClassParents.push([Number(id), Number(parentId)]);
+    }
+    for (const [srcId, srcParent] of newClassParents) {
+      if (classMap[srcParent] !== undefined) {
+        this._run('UPDATE classes SET parent_class_id = ? WHERE id = ?', [classMap[srcParent], classMap[srcId]]);
+      }
+    }
+
+    // -- properties, merged by URI; inverses linked only for newly-added -----
+    const propMap: { [srcId: number]: number } = {};
+    const newPropInverses: Array<[number, number]> = [];
+    let propertiesAdded = 0;
+    for (const [id, uri, label, domainId, rangeId, invId, sub, isLabelProp, def, comment, flags, synth] of srcRows(
+      `SELECT id, uri, label, domain_class_id, range_class_id, inverse_property_id, sub_property_of,
+              is_label_property, definition, comment, flags_json, synthesised FROM properties`
+    )) {
+      const existing = this._one('SELECT id FROM properties WHERE uri = ?', [uri]);
+      if (existing !== undefined && existing !== null) {
+        propMap[Number(id)] = Number(existing);
+        continue;
+      }
+      this._run(
+        `INSERT INTO properties
+           (uri, label, domain_class_id, range_class_id, sub_property_of, is_label_property,
+            definition, comment, flags_json, synthesised)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uri, label,
+         domainId === null || classMap[Number(domainId)] === undefined ? null : classMap[Number(domainId)],
+         rangeId === null || classMap[Number(rangeId)] === undefined ? null : classMap[Number(rangeId)],
+         sub, isLabelProp, def, comment, flags, synth]
+      );
+      propMap[Number(id)] = this._lastId();
+      propertiesAdded++;
+      if (invId !== null) newPropInverses.push([Number(id), Number(invId)]);
+    }
+    for (const [srcId, srcInv] of newPropInverses) {
+      if (propMap[srcInv] !== undefined) {
+        this._run('UPDATE properties SET inverse_property_id = ? WHERE id = ?', [propMap[srcInv], propMap[srcId]]);
+      }
+    }
+
+    // -- concepts: reuse by URI, insert the rest -----------------------------
+    const conceptMap: { [srcId: number]: number } = {};
+    const addedSrcIds: { [srcId: number]: true } = {};
+    let conceptsAdded = 0;
+    let conceptsReused = 0;
+    for (const [id, uri, guid, clsId, pref] of srcConcepts) {
+      const existing = this._one('SELECT id FROM concepts WHERE uri = ?', [uri]);
+      if (existing !== undefined && existing !== null) {
+        conceptMap[Number(id)] = Number(existing);
+        conceptsReused++;
+        continue;
+      }
+      // guid is UNIQUE — a colliding guid on a different URI would abort the
+      // whole attach, so the incoming copy drops its guid instead.
+      let g = guid;
+      if (g !== null && this._one('SELECT id FROM concepts WHERE guid = ?', [g]) !== undefined) g = null;
+      this._run('INSERT INTO concepts (uri, guid, class_id, pref_label) VALUES (?, ?, ?, ?)',
+        [uri, g, clsId === null || classMap[Number(clsId)] === undefined ? null : classMap[Number(clsId)], pref]);
+      conceptMap[Number(id)] = this._lastId();
+      addedSrcIds[Number(id)] = true;
+      conceptsAdded++;
+    }
+
+    // -- labels and annotations, for newly-added concepts only ---------------
+    let labelsAdded = 0;
+    for (const [cid, uri, prop, form, lang, flags] of srcRows(
+      'SELECT concept_id, uri, label_property, literal_form, lang, flags_json FROM labels'
+    )) {
+      if (!addedSrcIds[Number(cid)]) continue;
+      this._run(
+        'INSERT OR IGNORE INTO labels (uri, concept_id, label_property, literal_form, lang, flags_json) VALUES (?, ?, ?, ?, ?, ?)',
+        [uri, conceptMap[Number(cid)], prop, form, lang, flags]
+      );
+      labelsAdded++;
+    }
+    let annotationsAdded = 0;
+    for (const [cid, pred, value, lang, dt] of srcRows(
+      'SELECT concept_id, predicate_uri, value, lang, datatype FROM annotations'
+    )) {
+      if (!addedSrcIds[Number(cid)]) continue;
+      this._run(
+        'INSERT INTO annotations (concept_id, predicate_uri, value, lang, datatype) VALUES (?, ?, ?, ?, ?)',
+        [conceptMap[Number(cid)], pred, value, lang, dt]
+      );
+      annotationsAdded++;
+    }
+
+    // -- hierarchy: internal edges for added children only (reused concepts
+    // keep their existing place), then the source's roots under the target ----
+    const srcHasParent: { [srcId: number]: true } = {};
+    let broaderEdges = 0;
+    for (const [cid, pid] of srcRows('SELECT concept_id, parent_concept_id FROM broader')) {
+      srcHasParent[Number(cid)] = true;
+      if (!addedSrcIds[Number(cid)] || conceptMap[Number(pid)] === undefined) continue;
+      this._run('INSERT OR IGNORE INTO broader (concept_id, parent_concept_id) VALUES (?, ?)',
+        [conceptMap[Number(cid)], conceptMap[Number(pid)]]);
+      broaderEdges++;
+    }
+
+    // Ancestors of the target, so attaching a root cannot create a cycle
+    // (e.g. re-attaching a branch exported from above the target).
+    const targetAncestors: { [id: number]: true } = {};
+    for (const r of this._rows(
+      `WITH RECURSIVE anc(id) AS (
+         SELECT ? UNION
+         SELECT b.parent_concept_id FROM broader b JOIN anc a ON b.concept_id = a.id
+       ) SELECT id FROM anc`,
+      [targetConceptId]
+    )) {
+      targetAncestors[Number(r[0])] = true;
+    }
+
+    let rootsAttached = 0;
+    for (const [id] of srcConcepts) {
+      if (srcHasParent[Number(id)]) continue;
+      const mapped = conceptMap[Number(id)];
+      if (mapped === targetConceptId || targetAncestors[mapped]) continue;
+      this._run('INSERT OR IGNORE INTO broader (concept_id, parent_concept_id) VALUES (?, ?)',
+        [mapped, targetConceptId]);
+      rootsAttached++;
+    }
+
+    // -- relationships: both ends must map, at least one end must be new -----
+    let relationshipsAdded = 0;
+    for (const [s, p, t] of srcRows(
+      'SELECT source_concept_id, property_id, target_concept_id FROM relationships'
+    )) {
+      const ms = conceptMap[Number(s)], mp = propMap[Number(p)], mt = conceptMap[Number(t)];
+      if (ms === undefined || mp === undefined || mt === undefined) continue;
+      if (!addedSrcIds[Number(s)] && !addedSrcIds[Number(t)]) continue;
+      // Decision 3: never store both directions — skip when the mirror exists.
+      const inv = this._one('SELECT inverse_property_id FROM properties WHERE id = ?', [mp]);
+      if (inv !== undefined && inv !== null && this._one(
+        'SELECT 1 FROM relationships WHERE source_concept_id = ? AND property_id = ? AND target_concept_id = ?',
+        [mt, inv, ms]
+      ) !== undefined) continue;
+      this._run(
+        'INSERT OR IGNORE INTO relationships (source_concept_id, property_id, target_concept_id) VALUES (?, ?, ?)',
+        [ms, mp, mt]
+      );
+      relationshipsAdded++;
+    }
+
+    // -- passthrough about the added concepts (extra rdf:types etc.) ---------
+    const addedUris: { [uri: string]: true } = {};
+    for (const [id, uri] of srcConcepts) {
+      if (addedSrcIds[Number(id)]) addedUris[String(uri)] = true;
+    }
+    let passthroughAdded = 0;
+    for (const [subj, pred, obj, kind, lang, dt] of srcRows(
+      "SELECT subject, predicate, object, object_kind, lang, datatype FROM passthrough_triples WHERE object_kind <> 'raw'"
+    )) {
+      if (!addedUris[String(subj)]) continue;
+      this._run(
+        'INSERT INTO passthrough_triples (subject, predicate, object, object_kind, lang, datatype) VALUES (?, ?, ?, ?, ?, ?)',
+        [subj, pred, obj, kind, lang, dt]
+      );
+      passthroughAdded++;
+    }
+
+    const sourceName = srcRows("SELECT value FROM import_metadata WHERE key = 'source_file'");
+    const stats: IAttachStats = {
+      conceptsAdded, conceptsReused, rootsAttached, broaderEdges,
+      relationshipsAdded, labelsAdded, annotationsAdded,
+      classesAdded, propertiesAdded, passthroughAdded
+    };
+    this._journal('insert', 'concept', targetUri, {
+      attachedOntology: sourceName.length ? String(sourceName[0][0]) : 'unknown',
+      ...stats
+    });
+    return stats;
   }
 
   // -- change log ------------------------------------------------------------

@@ -20,6 +20,8 @@ export interface IConceptEditHandlers {
   onAddAnnotation: () => void;
   onEditAnnotation: (annotation: IAnnotation) => void;
   onDeleteAnnotation: (annotation: IAnnotation) => void;
+  onExportBranch: () => void;
+  onAttachOntology: () => void;
 }
 
 export interface IConceptDetailProps {
@@ -240,6 +242,20 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
         {detail.prefLabel || localName(detail.uri)}
         {edit && (
           <RowAction icon="Edit" title="Rename this concept" onClick={edit.onRename} />
+        )}
+        {edit && (
+          <RowAction
+            icon="Export"
+            title="Export this concept and everything under it as a smaller, standalone ontology"
+            onClick={edit.onExportBranch}
+          />
+        )}
+        {edit && (
+          <RowAction
+            icon="BranchMerge"
+            title="Attach another ontology (.ttl or .sqlite) underneath this concept"
+            onClick={edit.onAttachOntology}
+          />
         )}
       </h1>
 

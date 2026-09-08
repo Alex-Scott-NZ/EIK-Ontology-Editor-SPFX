@@ -62,8 +62,20 @@ function flagTermStr(t: IFlagTerm): string {
   return t.t === 'i' ? iri(t.v) : lit(t.v, t.lang, t.dt);
 }
 
-/** Serialise the whole database to Turtle text. */
-export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportStats } {
+export interface IExportFilter {
+  /**
+   * Restrict concept-level content (concepts, their labels, annotations,
+   * hierarchy and relationships) to these ids. The schema — prefixes, classes,
+   * properties — is always exported whole, so the subset is a valid,
+   * re-importable ontology. Broader edges and relationships survive only when
+   * BOTH ends are in the set: the subtree root comes out as a top concept, and
+   * links reaching outside the subtree are dropped.
+   */
+  conceptIds: { [id: number]: true };
+}
+
+/** Serialise the database to Turtle text — the whole of it, or a filtered subset. */
+export function exportTurtle(db: Database, filter?: IExportFilter): { ttl: string; stats: ITurtleExportStats } {
   const rows = (sql: string): unknown[][] => {
     const r = db.exec(sql);
     return r.length ? r[0].values as unknown[][] : [];
@@ -97,6 +109,17 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
     return lines;
   };
 
+  // When filtering, passthrough is restricted to triples about the included
+  // concepts themselves (extra rdf:types and the like). Scheme blocks, raw
+  // blocks and other unrelated subjects would dangle in a subset, so they stay
+  // behind — the subset is a standalone ontology, not a round-trip copy.
+  const includedUris: { [uri: string]: true } | undefined = filter ? {} : undefined;
+  if (filter && includedUris) {
+    for (const [id, u] of rows('SELECT id, uri FROM concepts')) {
+      if (filter.conceptIds[Number(id)]) includedUris[String(u)] = true;
+    }
+  }
+
   // -- Passthrough: everything unmodelled, replayed verbatim -----------------
   // Raw blocks (blank nodes/collections) are emitted as source text; their
   // sibling triple rows for the same subject are duplicates of what the raw
@@ -106,15 +129,18 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
   for (const [subj, pred, obj, kind, lang, dt] of rows(
     "SELECT subject, predicate, object, object_kind, lang, datatype FROM passthrough_triples WHERE object_kind <> 'raw'"
   )) {
+    if (includedUris && !includedUris[String(subj)]) continue;
     const o = kind === 'iri' ? iri(String(obj)) : lit(String(obj), lang as string | null, dt as string | null);
     (passBySubject[String(subj)] = passBySubject[String(subj)] || []).push(`${iri(String(pred))} ${o}`);
     passthroughCount++;
   }
   for (const s of Object.keys(passBySubject)) block(s, passBySubject[s]);
-  for (const [, , raw] of rows("SELECT subject, predicate, object FROM passthrough_triples WHERE object_kind = 'raw'")) {
-    out.push(String(raw) + ' .');
-    out.push('');
-    passthroughCount++;
+  if (!filter) {
+    for (const [, , raw] of rows("SELECT subject, predicate, object FROM passthrough_triples WHERE object_kind = 'raw'")) {
+      out.push(String(raw) + ' .');
+      out.push('');
+      passthroughCount++;
+    }
   }
 
   // -- Classes ---------------------------------------------------------------
@@ -154,11 +180,14 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
   }
 
   // -- Concepts --------------------------------------------------------------
+  // conceptUri stays complete even when filtering — edge guards below decide
+  // inclusion; conceptLines existing is what marks a concept as included.
   const conceptUri: { [id: number]: string } = {};
   const conceptLines: { [id: number]: string[] } = {};
   for (const [id, u, guid, clsId] of rows('SELECT id, uri, guid, class_id FROM concepts')) {
     const cid = Number(id);
     conceptUri[cid] = String(u);
+    if (filter && !filter.conceptIds[cid]) continue;
     const lines: string[] = [];
     if (clsId !== null) lines.push(`a ${iri(classUri[Number(clsId)])}`);
     if (guid !== null) lines.push(`${iri(SEM_GUID)} ${lit(String(guid))}`);
@@ -166,16 +195,19 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
   }
 
   for (const [cid, pid] of rows('SELECT concept_id, parent_concept_id FROM broader')) {
+    if (!conceptLines[Number(cid)] || (filter && !filter.conceptIds[Number(pid)])) continue;
     conceptLines[Number(cid)].push(`${iri(SKOS_BROADER)} ${iri(conceptUri[Number(pid)])}`);
   }
 
   for (const [cid, pred, value, lang, dt] of rows(
     'SELECT concept_id, predicate_uri, value, lang, datatype FROM annotations'
   )) {
+    if (!conceptLines[Number(cid)]) continue;
     conceptLines[Number(cid)].push(`${iri(String(pred))} ${lit(String(value), lang as string | null, dt as string | null)}`);
   }
 
   for (const [cid, labelUri, pred] of rows('SELECT concept_id, uri, label_property FROM labels')) {
+    if (!conceptLines[Number(cid)]) continue;
     conceptLines[Number(cid)].push(`${iri(String(pred))} ${iri(String(labelUri))}`);
   }
 
@@ -184,6 +216,7 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
   let relTriples = 0;
   for (const [src, propId, tgt] of rows('SELECT source_concept_id, property_id, target_concept_id FROM relationships')) {
     const s = Number(src), p = Number(propId), t = Number(tgt);
+    if (!conceptLines[s] || !conceptLines[t]) continue;
     conceptLines[s].push(`${iri(propUri[p])} ${iri(conceptUri[t])}`);
     relTriples++;
     const inv = propInverse[p];
@@ -202,7 +235,10 @@ export function exportTurtle(db: Database): { ttl: string; stats: ITurtleExportS
   // -- Label resources (deduped: multi-attached labels share one block) ------
   let labelCount = 0;
   const seenLabel: { [u: string]: true } = {};
-  for (const [u, form, lang, flagsJson] of rows('SELECT uri, literal_form, lang, flags_json FROM labels')) {
+  for (const [u, form, lang, flagsJson, cid] of rows(
+    'SELECT uri, literal_form, lang, flags_json, concept_id FROM labels'
+  )) {
+    if (!conceptLines[Number(cid)]) continue;
     const uStr = String(u);
     if (seenLabel[uStr]) continue;
     seenLabel[uStr] = true;

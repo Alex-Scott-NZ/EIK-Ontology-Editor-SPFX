@@ -176,6 +176,27 @@ export class OntologyDatabase {
   }
 
   /**
+   * The concept and everything narrower than it, on every path (polyhierarchy
+   * included). UNION (not UNION ALL) makes the recursion cycle-safe: a row
+   * already in the set is not re-queued.
+   */
+  public getDescendantIds(rootConceptId: number): { [id: number]: true } {
+    const ids: { [id: number]: true } = {};
+    for (const r of this._rows(
+      `WITH RECURSIVE sub(id) AS (
+         SELECT ?
+         UNION
+         SELECT b.concept_id FROM broader b JOIN sub s ON b.parent_concept_id = s.id
+       )
+       SELECT id FROM sub`,
+      [rootConceptId]
+    )) {
+      ids[Number(r[0])] = true;
+    }
+    return ids;
+  }
+
+  /**
    * Roots with their child counts, so the tree can draw expand chevrons without
    * a follow-up query per node.
    */

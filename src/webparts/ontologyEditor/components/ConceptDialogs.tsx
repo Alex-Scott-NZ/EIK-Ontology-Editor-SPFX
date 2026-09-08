@@ -2,9 +2,10 @@ import * as React from 'react';
 import {
   Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton,
   TextField, Dropdown, IDropdownOption, ComboBox, IComboBox, SearchBox, MessageBar, MessageBarType,
-  ChoiceGroup, IChoiceGroupOption, Label as FluentLabel
+  ChoiceGroup, IChoiceGroupOption, Label as FluentLabel, Checkbox, Spinner, SpinnerSize
 } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
+import { ILibraryFile } from '../../../services/sharepoint/FileService';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import {
   ILabelFlagEdit, LABEL_FLAG_DEFINITIONS
@@ -758,6 +759,175 @@ export const AnnotationDialog: React.FC<IAnnotationDialogProps> = (props) => {
       <DialogFooter>
         <PrimaryButton text="Save" onClick={() => onSave(pred, value)} />
         <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+
+/* -------------------------------------------------------- export branch -- */
+
+export const ExportBranchDialog: React.FC<{
+  conceptLabel: string;
+  /** Concepts in the branch, root included. */
+  conceptCount: number;
+  initialName: string;
+  /** Hidden when there is no SharePoint context (e.g. local workbench). */
+  canSaveToSharePoint: boolean;
+  folderPath?: string;
+  onExport: (baseName: string, formats: { ttl: boolean; sqlite: boolean }, dest: 'download' | 'library') => void;
+  onCancel: () => void;
+  error?: string;
+}> = ({ conceptLabel, conceptCount, initialName, canSaveToSharePoint, folderPath, onExport, onCancel, error }) => {
+  const [name, setName] = React.useState(initialName);
+  const [ttl, setTtl] = React.useState(true);
+  const [sqlite, setSqlite] = React.useState(false);
+
+  const cleaned = (): string => name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/[.](ttl|sqlite)$/i, '');
+  const ready = !!cleaned() && (ttl || sqlite);
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: `Export the branch under "${conceptLabel}"`,
+        subText: `"${conceptLabel}" and everything narrower — ${conceptCount.toLocaleString()} ` +
+                 `concept${conceptCount === 1 ? '' : 's'} — becomes a standalone ontology. ` +
+                 'It keeps the full class and relationship-type schema, so it can be opened, ' +
+                 'edited and attached elsewhere. Relationships reaching outside the branch are dropped.'
+      }}
+      modalProps={{ isBlocking: true }}
+      minWidth={520}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      <TextField
+        label="Name" required autoFocus
+        value={name}
+        onChange={(_, v) => setName(v || '')}
+        description="The extension is added per format"
+      />
+      <Checkbox
+        label="Turtle (.ttl) — Semaphore-compatible, attachable, human-readable"
+        checked={ttl}
+        onChange={(_, v) => setTtl(!!v)}
+        styles={{ root: { marginTop: 12 } }}
+      />
+      <Checkbox
+        label="SQLite (.sqlite) — opens instantly in this editor"
+        checked={sqlite}
+        onChange={(_, v) => setSqlite(!!v)}
+        styles={{ root: { marginTop: 8 } }}
+      />
+
+      <DialogFooter>
+        {canSaveToSharePoint && (
+          <PrimaryButton
+            text="Save to SharePoint" disabled={!ready}
+            title={folderPath ? `Saves into ${folderPath}` : undefined}
+            onClick={() => onExport(cleaned(), { ttl, sqlite }, 'library')}
+          />
+        )}
+        <DefaultButton
+          text="Download" disabled={!ready}
+          onClick={() => onExport(cleaned(), { ttl, sqlite }, 'download')}
+        />
+        <DefaultButton text="Cancel" onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+/* ------------------------------------------------------ attach ontology -- */
+
+export const AttachOntologyDialog: React.FC<{
+  targetLabel: string;
+  /** Lists .ttl/.sqlite files in the ontology folder; undefined = no SharePoint. */
+  listLibraryFiles?: () => Promise<ILibraryFile[]>;
+  onAttach: (choice: { file?: File; path?: string }) => void;
+  onCancel: () => void;
+  error?: string;
+  /** Progress text while the source is downloading/parsing/merging. */
+  busy?: string;
+}> = ({ targetLabel, listLibraryFiles, onAttach, onCancel, error, busy }) => {
+  const [files, setFiles] = React.useState<ILibraryFile[] | undefined>(undefined);
+  const [listError, setListError] = React.useState<string | undefined>(undefined);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (!listLibraryFiles) return;
+    listLibraryFiles()
+      .then(setFiles)
+      .catch(e => setListError(e instanceof Error ? e.message : String(e)));
+  }, [listLibraryFiles]);
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={busy ? () => undefined : onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: `Attach an ontology under "${targetLabel}"`,
+        subText: 'The chosen ontology\u2019s top concepts become children of this concept. ' +
+                 'Concepts whose URI already exists here are reused, not duplicated; new classes ' +
+                 'and relationship types are merged in by URI. One undoable change.'
+      }}
+      modalProps={{ isBlocking: true }}
+      minWidth={560}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      {busy ? (
+        <Spinner size={SpinnerSize.large} label={busy} />
+      ) : (
+        <>
+          <DefaultButton
+            text="Choose a local .ttl or .sqlite file…"
+            iconProps={{ iconName: 'OpenFile' }}
+            onClick={() => fileInput.current && fileInput.current.click()}
+          />
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".ttl,.turtle,.sqlite,.db"
+            style={{ display: 'none' }}
+            onChange={() => {
+              const f = fileInput.current && fileInput.current.files && fileInput.current.files[0];
+              if (f) onAttach({ file: f });
+            }}
+          />
+
+          {listLibraryFiles && (
+            <>
+              <h4 className={styles.flagsHeading}>Or attach from the SharePoint ontology folder</h4>
+              {listError && <MessageBar messageBarType={MessageBarType.warning}>{listError}</MessageBar>}
+              {!files && !listError && <Spinner size={SpinnerSize.small} label="Listing files…" />}
+              {files && files.length === 0 && <p className={styles.muted}>No .ttl or .sqlite files there yet.</p>}
+              {files && files.length > 0 && (
+                <table className={styles.fileTable}>
+                  <tbody>
+                    {[...files]
+                      .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
+                      .map(f => (
+                        <tr key={f.serverRelativeUrl}>
+                          <td>{f.name}</td>
+                          <td>
+                            <DefaultButton text="Attach" onClick={() => onAttach({ path: f.serverRelativeUrl })} />
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      <DialogFooter>
+        <DefaultButton text="Cancel" disabled={!!busy} onClick={onCancel} />
       </DialogFooter>
     </Dialog>
   );
