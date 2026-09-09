@@ -866,7 +866,19 @@ export const PublishDialog: React.FC<{
 }> = ({ target, suggestion, unpublishedChanges, publishedAt, publishedBy,
         unsavedChanges, onPublish, onCancel, error, busy }) => {
   const [url, setUrl] = React.useState(target || suggestion);
-  const valid = /^https:\/\/[^\s]+\/[^\s/]+\/[^\s/]+$/i.test(url.trim());
+  // Not a regex: SharePoint library names routinely contain spaces
+  // ("Shared Documents"), apostrophes and ampersands. Parse it instead and
+  // check the shape — an https URL with at least a folder and a file name.
+  const valid = ((): boolean => {
+    try {
+      const u = new URL(url.trim());
+      if (u.protocol !== 'https:') return false;
+      const segments = decodeURIComponent(u.pathname).split('/').filter(Boolean);
+      return segments.length >= 2 && /\.[A-Za-z0-9]+$/.test(segments[segments.length - 1]);
+    } catch {
+      return false;
+    }
+  })();
 
   return (
     <Dialog
@@ -904,7 +916,9 @@ export const PublishDialog: React.FC<{
             value={url}
             onChange={(_, v) => setUrl(v || '')}
             description="Everyone who uses the viewer needs read access here; you need write access."
-            errorMessage={url.trim() && !valid ? 'Expected https://…/<site>/<folder>/<file>.sqlite' : undefined}
+            errorMessage={url.trim() && !valid
+              ? 'Expected a full https URL ending in a file name, e.g. https://tenant.sharepoint.com/sites/knowledge/Shared Documents/Ontology/ontology.sqlite'
+              : undefined}
           />
 
           <p className={styles.muted}>

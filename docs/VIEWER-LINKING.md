@@ -171,6 +171,19 @@ server, so without a change a publish would take up to a day to reach readers
 — which would make "Publish" a lie. The viewer must compare the file's ETag /
 Last-Modified before reusing a cached copy, and refetch when it differs.
 
+### Constraint this puts on the hosting decision
+
+The viewer reads from **its own site** — `pageContext.web.absoluteUrl` plus the
+folder property; it has no notion of reading across site collections. So:
+
+> the site hosting the **viewer page** must be the site holding the
+> **published copy**, and that site must be readable by everyone.
+
+The editor publishes *out* across sites (verified), but the viewer only reads
+*locally*. That is the right split — readers never need access to the editor's
+site — but it means choosing the viewer's home site and the published file's
+location is a single decision, not two.
+
 ### Publish-time safeguards
 
 - Run the existing integrity checks before writing the live copy, so a broken

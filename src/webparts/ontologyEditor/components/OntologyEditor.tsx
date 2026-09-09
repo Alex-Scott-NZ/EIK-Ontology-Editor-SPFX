@@ -176,6 +176,9 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     setClassColours(db.getClassColourMap());
     setClassLabels(db.getClassLabelMap());
     setPendingChanges(writer.getChangeCount());
+    // Every edit moves the journal on, so the live copy falls further behind —
+    // recompute here or the "not published" count silently stays stale.
+    setPublishState(writer.getPublishState());
     setRefreshToken(t => t + 1);
   }, [writer, db]);
 
@@ -392,19 +395,32 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       await fileService.ensureFolder(folderPath, webUrl);
       await fileService.writeFile(folderPath, targetName, bytes, webUrl);
 
+      // Persist the stamp in the MASTER too. It only lives in memory until the
+      // master is rewritten, so without this the record of what was published
+      // is lost the moment the file is reopened — and the editor would offer no
+      // way to tell whether the live copy was current.
+      setPublishBusy('Recording the publish in the master…');
+      if (effectiveFolder) {
+        await fileService.ensureFolder(effectiveFolder);
+        await fileService.writeFile(effectiveFolder, fileName, db.export());
+        writer.markClean();
+        setSavedChanges(writer.getChangeCount());
+      }
+
       setPublishState(state);
       refreshAfterChange();
       closeDialog();
       setNotice(
         `Published to ${targetName}. Everyone using the viewer sees this version ` +
-        'from their next page load.'
+        'from their next page load.' +
+        (effectiveFolder ? ' The master was saved with a record of this publish.' : '')
       );
     } catch (e) {
       setDialogError(e instanceof Error ? e.message : String(e));
     } finally {
       setPublishBusy(undefined);
     }
-  }, [db, writer, fileService, refreshAfterChange, closeDialog]);
+  }, [db, writer, fileService, effectiveFolder, fileName, refreshAfterChange, closeDialog]);
 
   /**
    * Export the selected concept's branch as a standalone ontology. The .ttl is
