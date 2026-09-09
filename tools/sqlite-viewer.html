@@ -307,6 +307,28 @@ GROUP BY 1 ORDER BY n DESC`],
   ['Relationships both directions', `SELECT COALESCE(p.label,p.uri) AS type, l.direction, COUNT(*) AS n
 FROM v_concept_links l JOIN properties p ON p.id = l.property_id
 GROUP BY 1,2 ORDER BY n DESC`],
+  ['Relationships, readable (source → type → target)', `SELECT s.pref_label AS source,
+       COALESCE(p.label, p.uri) AS relationship,
+       t.pref_label AS target
+FROM relationships r
+JOIN concepts   s ON s.id = r.source_concept_id
+JOIN properties p ON p.id = r.property_id
+JOIN concepts   t ON t.id = r.target_concept_id
+ORDER BY source, relationship, target
+LIMIT 500`],
+  ['One concept, everything about it', `-- Change the name on the next line.
+WITH me AS (SELECT id, pref_label FROM concepts WHERE pref_label = 'Income tax')
+SELECT 'parent'       AS kind, p.pref_label AS value, '' AS detail
+  FROM broader b JOIN me ON me.id = b.concept_id JOIN concepts p ON p.id = b.parent_concept_id
+UNION ALL SELECT 'child', c.pref_label, ''
+  FROM broader b JOIN me ON me.id = b.parent_concept_id JOIN concepts c ON c.id = b.concept_id
+UNION ALL SELECT 'label', l.literal_form, COALESCE(pr.label, l.label_property)
+  FROM labels l JOIN me ON me.id = l.concept_id LEFT JOIN properties pr ON pr.uri = l.label_property
+UNION ALL SELECT 'metadata', a.value, COALESCE(pr.label, a.predicate_uri)
+  FROM annotations a JOIN me ON me.id = a.concept_id LEFT JOIN properties pr ON pr.uri = a.predicate_uri
+UNION ALL SELECT 'related', o.pref_label, COALESCE(pr.label, pr.uri)
+  FROM v_concept_links v JOIN me ON me.id = v.concept_id
+  JOIN properties pr ON pr.id = v.property_id JOIN concepts o ON o.id = v.other_concept_id`],
   ['Integrity: links with a missing end', `SELECT COUNT(*) AS broken FROM relationships r
 LEFT JOIN concepts s ON s.id = r.source_concept_id
 LEFT JOIN concepts t ON t.id = r.target_concept_id
