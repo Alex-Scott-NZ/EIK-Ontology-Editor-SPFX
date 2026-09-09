@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "703f9f90-6d80-4bd3-a648-8477bd7f5bb8",
+  "alias": "OntologyExplorerWebPart",
+  "componentType": "WebPart",
+
+  "version": "*",
+  "manifestVersion": 2,
+
+  "requiresCustomScript": false,
+  "supportedHosts": ["SharePointWebPart", "SharePointFullPage"],
+  "supportsFullBleed": true,
+
+  "supportsThemeVariants": true,
+
+  "preconfiguredEntries": [
+    {
+      "groupId": "5c03119e-3074-46fd-976b-c60198311f70",
+      "group": { "default": "Advanced" },
+      "title": { "default": "Ontology Database Explorer" },
+      "description": {
+        "default": "Inspect an ontology .sqlite from SharePoint: tables, queries and a schema diagram. Read-only."
+      },
+      "officeFabricIconFontName": "Database",
+      "properties": {
+        "libraryFolder": ""
+      }
+    }
+  ]
+}

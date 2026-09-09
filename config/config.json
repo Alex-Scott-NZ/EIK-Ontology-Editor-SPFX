@@ -9,6 +9,14 @@
           "manifest": "./src/webparts/ontologyEditor/OntologyEditorWebPart.manifest.json"
         }
       ]
+    },
+    "ontology-explorer-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/ontologyExplorer/OntologyExplorerWebPart.js",
+          "manifest": "./src/webparts/ontologyExplorer/OntologyExplorerWebPart.manifest.json"
+        }
+      ]
     }
   },
   "externals": {},

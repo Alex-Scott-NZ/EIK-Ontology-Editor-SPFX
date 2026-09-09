@@ -1,0 +1,229 @@
+@import '~@fluentui/react/dist/sass/References.scss';
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: "[theme:bodyText, default:#323130]";
+  padding: 8px 16px 16px;
+}
+
+.muted {
+  color: "[theme:neutralSecondary, default:#605e5c]";
+  font-size: 12px;
+}
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+
+.fileName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Read-only is the point of this web part — say so where it is doing the work. */
+.readOnlyChip {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: "[theme:themeLighter, default:#deecf9]";
+  color: "[theme:themeDarker, default:#004578]";
+}
+
+.panes {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 620px;
+}
+
+.sidebar {
+  flex: 0 0 280px;
+  overflow: auto;
+  max-height: 78vh;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
+  padding: 8px 0;
+  background: "[theme:neutralLighterAlt, default:#faf9f8]";
+}
+
+.sidebar h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: "[theme:neutralSecondary, default:#605e5c]";
+  margin: 12px 12px 4px;
+}
+
+.tableBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 5px 12px;
+  cursor: pointer;
+
+  &:hover { background: "[theme:neutralLighter, default:#f3f2f1]"; }
+}
+
+.tableBtnActive {
+  @extend .tableBtn;
+  background: "[theme:themeLighter, default:#deecf9]";
+  font-weight: 600;
+}
+
+.rowCount {
+  float: right;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queryBar {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.queryBox {
+  flex: 1 1 auto;
+  min-height: 66px;
+  font: 13px/1.4 ui-monospace, Consolas, monospace;
+  padding: 8px;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
+  resize: vertical;
+  background: "[theme:white, default:#ffffff]";
+  color: inherit;
+}
+
+.results {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
+}
+
+.grid {
+  border-collapse: collapse;
+  font: 12.5px/1.4 ui-monospace, Consolas, monospace;
+  width: max-content;
+  min-width: 100%;
+
+  th, td {
+    border-bottom: 1px solid "[theme:neutralLighter, default:#f3f2f1]";
+    padding: 4px 10px;
+    text-align: left;
+    vertical-align: top;
+    max-width: 520px;
+    white-space: pre-wrap;
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    background: "[theme:neutralLighterAlt, default:#faf9f8]";
+    font-weight: 600;
+  }
+
+  tr:hover td { background: "[theme:neutralLighterAlt, default:#faf9f8]"; }
+}
+
+.nullValue {
+  color: "[theme:neutralTertiary, default:#a19f9d]";
+}
+
+.pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 4px;
+}
+
+/* ------------------------------------------------------------- diagram -- */
+
+.diagram {
+  overflow: auto;
+  max-height: 76vh;
+  border: 1px solid "[theme:neutralLight, default:#edebe9]";
+  border-radius: 4px;
+  background: "[theme:white, default:#ffffff]";
+}
+
+.diagramBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid "[theme:neutralLight, default:#edebe9]";
+  background: "[theme:neutralLighterAlt, default:#faf9f8]";
+}
+
+.erSvg {
+  display: block;
+  width: 100%;
+  min-height: 620px;
+}
+
+.erBox {
+  fill: "[theme:neutralLighterAlt, default:#faf9f8]";
+  stroke: "[theme:neutralLight, default:#edebe9]";
+  stroke-width: 1.5;
+}
+
+.erHeader {
+  fill: "[theme:themePrimary, default:#0078d4]";
+}
+
+.erTitle {
+  fill: #ffffff;
+  font: 700 12.5px ui-monospace, Consolas, monospace;
+}
+
+.erCol {
+  font: 11px ui-monospace, Consolas, monospace;
+  fill: "[theme:neutralSecondary, default:#605e5c]";
+}
+
+.erColPk {
+  @extend .erCol;
+  fill: "[theme:bodyText, default:#323130]";
+  font-weight: 700;
+}
+
+.erType {
+  fill: "[theme:neutralTertiary, default:#a19f9d]";
+}
+
+.erEdge {
+  fill: none;
+  stroke: "[theme:neutralSecondary, default:#605e5c]";
+  stroke-width: 1.4;
+  opacity: 0.7;
+}
+
+.erEdgeLabel {
+  font: 10px ui-monospace, Consolas, monospace;
+  fill: "[theme:neutralSecondary, default:#605e5c]";
+}
+
+.erNode {
+  cursor: move;
+}
