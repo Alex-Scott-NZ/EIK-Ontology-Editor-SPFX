@@ -1,13 +1,25 @@
-// Upload + deploy an .sppkg to the tenant app catalog via the ALM REST API,
+// Upload + deploy an .sppkg to a SharePoint app catalog via the ALM REST API,
 // executed inside the signed-in SharePoint page (user's own session/cookies).
-// Usage: node upload-sppkg.mjs <sppkg path> <catalog site url> [--skip-feature-deploy]
+//
+// Usage:
+//   node upload-sppkg.mjs <sppkg> <catalog site url> [--skip-feature-deploy] [--site-collection]
+//
+// --site-collection targets that site's OWN app catalog
+// (/_api/web/sitecollectionappcatalog) instead of the tenant-wide one. Which
+// you need depends on where the solution already lives — check first, or you
+// will deploy a second copy into the wrong scope.
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 const PORT = 9222;
 const [, , sppkgPath, catalogUrl] = process.argv;
 const skipFeature = process.argv.includes("--skip-feature-deploy");
-if (!sppkgPath || !catalogUrl) { console.error("usage: node upload-sppkg.mjs <sppkg> <catalogUrl> [--skip-feature-deploy]"); process.exit(1); }
+const siteCollection = process.argv.includes("--site-collection");
+// Solution name as it appears in AvailableApps (package-solution.json solution.name).
+const nameIdx = process.argv.indexOf("--name");
+const solutionName = nameIdx > -1 ? process.argv[nameIdx + 1] : "";
+const CATALOG = siteCollection ? "sitecollectionappcatalog" : "tenantappcatalog";
+if (!sppkgPath || !catalogUrl) { console.error("usage: node upload-sppkg.mjs <sppkg> <catalogUrl> [--skip-feature-deploy] [--site-collection]"); process.exit(1); }
 
 const bytes = readFileSync(sppkgPath);
 const b64 = bytes.toString("base64");
@@ -49,7 +61,7 @@ const expr = `
   }).then(r => r.json()).then(j => j.d.GetContextWebInformation.FormDigestValue);
 
   const up = await fetch(
-    catalog + "/_api/web/tenantappcatalog/Add(overwrite=true, url='" + ${JSON.stringify(fileName)} + "')",
+    catalog + "/_api/web/" + ${JSON.stringify(CATALOG)} + "/Add(overwrite=true, url='" + ${JSON.stringify(fileName)} + "')",
     { method: 'POST', headers: { accept: 'application/json', 'X-RequestDigest': digest }, body: buf }
   );
   const upJson = await up.json().catch(() => ({}));
@@ -57,15 +69,16 @@ const expr = `
   const productId = (upJson.UniqueId || (upJson.d && upJson.d.UniqueId)) || null;
 
   // Deploy by list-item lookup of the app's product id via AvailableApps.
-  const apps = await fetch(catalog + '/_api/web/tenantappcatalog/AvailableApps', {
+  const apps = await fetch(catalog + '/_api/web/' + ${JSON.stringify(CATALOG)} + '/AvailableApps', {
     headers: { accept: 'application/json' }
   }).then(r => r.json());
   const app = (apps.value || []).find(a => (a.Title || '').toLowerCase().includes('ontology') && a.ProductId);
-  const target = (apps.value || []).find(a => a.ProductId === '624711f3-c214-442b-8119-ba436ce2c89d') || app;
+  const wanted = ${JSON.stringify(solutionName.toLowerCase())};
+  const target = (wanted && (apps.value || []).find(a => (a.Title || '').toLowerCase() === wanted)) || app;
   if (!target) return { step: 'find', status: 'app not found in AvailableApps' };
 
   const dep = await fetch(
-    catalog + "/_api/web/tenantappcatalog/AvailableApps/GetById('" + target.ID + "')/Deploy",
+    catalog + "/_api/web/" + ${JSON.stringify(CATALOG)} + "/AvailableApps/GetById('" + target.ID + "')/Deploy",
     {
       method: 'POST',
       headers: {

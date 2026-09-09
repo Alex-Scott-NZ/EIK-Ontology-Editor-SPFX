@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ontology SQLite viewer (offline)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #242424; --muted: #6b6b6b;
+    --line: #e3e3e3; --accent: #0f6cbd; --panel: #faf9f8; --err: #a4262c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1f1f1f; --fg:#e8e8e8; --muted:#a0a0a0; --line:#3a3a3a; --accent:#68b3f5; --panel:#272727; --err:#f1707b; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .muted { color: var(--muted); font-size: 12px; }
+  main { display: flex; height: calc(100vh - 53px); }
+  #tables {
+    width: 290px; flex: 0 0 290px; overflow: auto;
+    border-right: 1px solid var(--line); background: var(--panel);
+  }
+  #tables button {
+    display: block; width: 100%; text-align: left; border: 0; background: none;
+    color: inherit; font: inherit; padding: 6px 12px; cursor: pointer;
+  }
+  #tables button:hover { background: var(--line); }
+  #tables button.on { background: var(--accent); color: #fff; }
+  #tables .n { float: right; opacity: .65; font-variant-numeric: tabular-nums; }
+  #tables h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 14px 12px 4px; font-weight: 600;
+  }
+  section { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+  .bar { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: flex-start; }
+  textarea {
+    flex: 1 1 auto; min-height: 62px; font: 13px/1.4 ui-monospace, Consolas, monospace;
+    padding: 8px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--fg); resize: vertical;
+  }
+  button.go {
+    border: 0; border-radius: 4px; background: var(--accent); color: #fff;
+    padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  select, input[type=file] { font: inherit; padding: 5px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+  #out { flex: 1 1 auto; overflow: auto; padding: 0 0 40px; }
+  table { border-collapse: collapse; font: 12.5px/1.4 ui-monospace, Consolas, monospace; width: max-content; min-width: 100%; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: left; vertical-align: top;
+           max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: pre-wrap; }
+  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; z-index: 1; }
+  tr:hover td { background: var(--panel); }
+  .pad { padding: 16px; }
+  .err { color: var(--err); white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
+  .drop {
+    margin: 40px auto; max-width: 560px; padding: 40px; text-align: center;
+    border: 2px dashed var(--line); border-radius: 8px; color: var(--muted);
+  }
+  .pager { padding: 8px 16px; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
+  .pager button { border: 1px solid var(--line); background: var(--bg); color: inherit; border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ontology SQLite viewer</h1>
+  <input type="file" id="file" accept=".sqlite,.db,.sqlite3">
+  <span class="muted" id="info">Runs entirely offline — the file is read in this page and never uploaded.</span>
+</header>
+
+<main>
+  <div id="tables"></div>
+  <section>
+    <div class="bar">
+      <textarea id="sql" spellcheck="false" placeholder="SELECT * FROM concepts LIMIT 50"></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="go" id="run">Run  (Ctrl+Enter)</button>
+        <select id="canned"><option value="">Canned queries…</option></select>
+      </div>
+    </div>
+    <div id="out">
+      <div class="drop" id="drop">Drop a <b>.sqlite</b> file here, or use the picker above.</div>
+    </div>
+    <div class="pager" id="pager" hidden>
+      <button id="prev">‹ Prev</button><span class="muted" id="range"></span><button id="next">Next ›</button>
+    </div>
+  </section>
+</main>
+
+<script>__SQLJS__</script>
+<script>
+const WASM_B64 = "__WASM_B64__";
+
+/* Canned queries for the ontology editor's schema. Harmless against other
+   databases — they simply error if the tables are absent. */
+const CANNED = [
+  ['Concepts per class', `SELECT COALESCE(cl.label,'(no class)') AS class, COUNT(*) AS concepts
+FROM concepts c LEFT JOIN classes cl ON cl.id = c.class_id
+GROUP BY 1 ORDER BY concepts DESC`],
+  ['Top concepts (no broader)', `SELECT c.id, c.pref_label, cl.label AS class
+FROM concepts c LEFT JOIN classes cl ON cl.id = c.class_id
+WHERE NOT EXISTS (SELECT 1 FROM broader b WHERE b.concept_id = c.id)
+ORDER BY c.pref_label`],
+  ['Concepts with several parents', `SELECT c.pref_label, COUNT(*) AS parents
+FROM broader b JOIN concepts c ON c.id = b.concept_id
+GROUP BY b.concept_id HAVING parents > 1 ORDER BY parents DESC, c.pref_label`],
+  ['Publish / provenance metadata', `SELECT key, value FROM import_metadata ORDER BY key`],
+  ['Change journal (latest 100)', `SELECT id, changed_at, author, op, entity, entity_uri
+FROM changes ORDER BY id DESC LIMIT 100`],
+  ['Label types in use', `SELECT COALESCE(p.label, l.label_property) AS type, COUNT(*) AS n
+FROM labels l LEFT JOIN properties p ON p.uri = l.label_property
+GROUP BY 1 ORDER BY n DESC`],
+  ['Metadata fields in use', `SELECT COALESCE(p.label, a.predicate_uri) AS field, COUNT(*) AS n
+FROM annotations a LEFT JOIN properties p ON p.uri = a.predicate_uri
+GROUP BY 1 ORDER BY n DESC`],
+  ['Relationships both directions', `SELECT COALESCE(p.label,p.uri) AS type, l.direction, COUNT(*) AS n
+FROM v_concept_links l JOIN properties p ON p.id = l.property_id
+GROUP BY 1,2 ORDER BY n DESC`],
+  ['Integrity: links with a missing end', `SELECT COUNT(*) AS broken FROM relationships r
+LEFT JOIN concepts s ON s.id = r.source_concept_id
+LEFT JOIN concepts t ON t.id = r.target_concept_id
+WHERE s.id IS NULL OR t.id IS NULL`]
+];
+
+let SQL = null, db = null, current = null, offset = 0;
+const PAGE = 200;
+const $ = (id) => document.getElementById(id);
+
+function bytesFromBase64(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function ready() {
+  if (!SQL) SQL = await initSqlJs({ wasmBinary: bytesFromBase64(WASM_B64) });
+  return SQL;
+}
+
+function esc(v) {
+  if (v === null || v === undefined) return '<span class="muted">NULL</span>';
+  if (v instanceof Uint8Array) return '<span class="muted">' + v.length + ' bytes</span>';
+  return String(v).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+function render(res) {
+  if (!res || !res.length) { $('out').innerHTML = '<div class="pad muted">No rows.</div>'; return; }
+  const { columns, values } = res[0];
+  const head = '<tr>' + columns.map(c => '<th>' + esc(c) + '</th>').join('') + '</tr>';
+  const body = values.map(r => '<tr>' + r.map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('');
+  $('out').innerHTML = '<table>' + head + body + '</table>';
+}
+
+function showError(e) {
+  $('out').innerHTML = '<div class="pad err">' + esc(e && e.message ? e.message : String(e)) + '</div>';
+}
+
+function listTables() {
+  const q = (s) => { const r = db.exec(s); return r.length ? r[0].values : []; };
+  const tables = q("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+  const views = q("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name");
+  const count = (n) => { try { return db.exec('SELECT COUNT(*) FROM "' + n + '"')[0].values[0][0]; } catch { return '?'; } };
+  const btn = (n) => '<button data-t="' + esc(n) + '">' + esc(n) + '<span class="n">' + count(n) + '</span></button>';
+  $('tables').innerHTML =
+    '<h2>Tables</h2>' + tables.map(r => btn(r[0])).join('') +
+    (views.length ? '<h2>Views</h2>' + views.map(r => btn(r[0])).join('') : '');
+  $('tables').querySelectorAll('button').forEach(b =>
+    b.onclick = () => { current = b.dataset.t; offset = 0; browse(); });
+}
+
+function browse() {
+  if (!current) return;
+  $('tables').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.t === current));
+  try {
+    render(db.exec('SELECT * FROM "' + current + '" LIMIT ' + PAGE + ' OFFSET ' + offset));
+    const total = db.exec('SELECT COUNT(*) FROM "' + current + '"')[0].values[0][0];
+    $('pager').hidden = false;
+    $('range').textContent = current + ' — rows ' + (offset + 1) + '–' + Math.min(offset + PAGE, total) + ' of ' + total;
+    $('prev').disabled = offset === 0;
+    $('next').disabled = offset + PAGE >= total;
+  } catch (e) { showError(e); }
+}
+
+function run() {
+  const sql = $('sql').value.trim();
+  if (!sql || !db) return;
+  $('pager').hidden = true;
+  try { render(db.exec(sql)); } catch (e) { showError(e); }
+}
+
+async function open(file) {
+  try {
+    $('out').innerHTML = '<div class="pad muted">Opening ' + esc(file.name) + '…</div>';
+    await ready();
+    const buf = await file.arrayBuffer();
+    if (db) db.close();
+    db = new SQL.Database(new Uint8Array(buf));
+    $('info').textContent = file.name + ' — ' + (buf.byteLength / 1048576).toFixed(1) + ' MB, read locally';
+    listTables();
+    $('out').innerHTML = '<div class="pad muted">Pick a table on the left, or run a query.</div>';
+    $('pager').hidden = true;
+  } catch (e) { showError(e); }
+}
+
+CANNED.forEach(([label, sql], i) => {
+  const o = document.createElement('option');
+  o.value = String(i); o.textContent = label;
+  $('canned').appendChild(o);
+});
+$('canned').onchange = (e) => {
+  const i = e.target.value;
+  if (i === '') return;
+  $('sql').value = CANNED[Number(i)][1];
+  e.target.value = '';
+  run();
+};
+
+$('file').onchange = (e) => { if (e.target.files[0]) open(e.target.files[0]); };
+$('run').onclick = run;
+$('sql').onkeydown = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } };
+$('prev').onclick = () => { offset = Math.max(0, offset - PAGE); browse(); };
+$('next').onclick = () => { offset += PAGE; browse(); };
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) open(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
