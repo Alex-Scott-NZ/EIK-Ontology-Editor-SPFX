@@ -64,6 +64,23 @@
   }
   .pager { padding: 8px 16px; display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); }
   .pager button { border: 1px solid var(--line); background: var(--bg); color: inherit; border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  #tables .schema {
+    margin: 10px 12px 4px; width: calc(100% - 24px); text-align: center;
+    border: 1px solid var(--accent); color: var(--accent); background: none;
+    border-radius: 4px; padding: 6px; font-weight: 600;
+  }
+  #tables .schema:hover { background: var(--accent); color: #fff; }
+  svg.er { width: 100%; height: 100%; display: block; cursor: grab; }
+  svg.er text { font: 11px ui-monospace, Consolas, monospace; fill: var(--fg); }
+  svg.er .tname { font-weight: 700; font-size: 12.5px; }
+  svg.er .col { fill: var(--muted); }
+  svg.er .pk { fill: var(--fg); font-weight: 700; }
+  svg.er rect.box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; rx: 5; }
+  svg.er rect.hdr { fill: var(--accent); rx: 5; }
+  svg.er text.hdrt { fill: #fff; font-weight: 700; font-size: 12.5px; }
+  svg.er path.fk { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .75; }
+  svg.er text.fklabel { font-size: 10px; fill: var(--muted); }
+  svg.er g.node { cursor: move; }
 </style>
 </head>
 <body>
@@ -376,10 +393,12 @@ function listTables() {
   const count = (n) => { try { return db.exec('SELECT COUNT(*) FROM "' + n + '"')[0].values[0][0]; } catch { return '?'; } };
   const btn = (n) => '<button data-t="' + esc(n) + '">' + esc(n) + '<span class="n">' + count(n) + '</span></button>';
   $('tables').innerHTML =
+    '<button class="schema" id="schemaBtn">Schema diagram</button>' +
     '<h2>Tables</h2>' + tables.map(r => btn(r[0])).join('') +
     (views.length ? '<h2>Views</h2>' + views.map(r => btn(r[0])).join('') : '');
-  $('tables').querySelectorAll('button').forEach(b =>
+  $('tables').querySelectorAll('button[data-t]').forEach(b =>
     b.onclick = () => { current = b.dataset.t; offset = 0; browse(); });
+  $('schemaBtn').onclick = drawSchema;
 }
 
 function browse() {
@@ -393,6 +412,211 @@ function browse() {
     $('prev').disabled = offset === 0;
     $('next').disabled = offset + PAGE >= total;
   } catch (e) { showError(e); }
+}
+
+/* ---------------------------------------------------------------- schema --
+   An ER diagram of the database itself: tables as boxes listing their columns,
+   foreign keys as lines between them. Everything comes from SQLite's own
+   PRAGMAs, so it works on any database, not just this project's.            */
+
+function readSchema() {
+  const q = (s) => { const r = db.exec(s); return r.length ? r[0].values : []; };
+  const names = q("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .map(r => String(r[0]));
+
+  const nodes = names.map(name => {
+    const cols = q('PRAGMA table_info("' + name + '")')
+      .map(r => ({ name: String(r[1]), type: String(r[2] || ''), pk: Number(r[5]) > 0 }));
+    // Box is sized to its content so nothing overlaps once laid out.
+    const widest = Math.max(name.length + 2, ...cols.map(c => (c.name + ' ' + c.type).length));
+    return {
+      name, cols,
+      w: Math.min(300, Math.max(130, widest * 6.6 + 20)),
+      h: 24 + cols.length * 14 + 8,
+      x: 0, y: 0, vx: 0, vy: 0
+    };
+  });
+
+  const byName = new Map(nodes.map(n => [n.name, n]));
+  const links = [];
+  for (const n of nodes) {
+    for (const r of q('PRAGMA foreign_key_list("' + n.name + '")')) {
+      const target = byName.get(String(r[2]));
+      if (target) links.push({ s: n, t: target, label: String(r[3] || '') });
+    }
+  }
+  return { nodes, links };
+}
+
+/** Small force layout: links pull, boxes push apart, then overlaps resolved. */
+function layout(nodes, links) {
+  const W = 1200, H = 820;
+  nodes.forEach((n, i) => {
+    const a = (i / nodes.length) * Math.PI * 2;
+    n.x = W / 2 + Math.cos(a) * 300;
+    n.y = H / 2 + Math.sin(a) * 240;
+  });
+
+  for (let step = 0; step < 400; step++) {
+    for (const n of nodes) { n.vx = 0; n.vy = 0; }
+
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d = Math.hypot(dx, dy) || 0.01;
+        const want = (a.w + b.w) / 2 + 70;
+        if (d < want) {
+          const push = (want - d) / d * 0.5;
+          dx *= push; dy *= push;
+          a.vx -= dx; a.vy -= dy; b.vx += dx; b.vy += dy;
+        }
+      }
+    }
+    for (const l of links) {
+      const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      const want = (l.s.w + l.t.w) / 2 + 110;
+      const pull = (d - want) / d * 0.06;
+      l.s.vx += dx * pull; l.s.vy += dy * pull;
+      l.t.vx -= dx * pull; l.t.vy -= dy * pull;
+    }
+    for (const n of nodes) {
+      n.vx += (W / 2 - n.x) * 0.004;
+      n.vy += (H / 2 - n.y) * 0.004;
+      n.x += Math.max(-20, Math.min(20, n.vx));
+      n.y += Math.max(-20, Math.min(20, n.vy));
+    }
+  }
+}
+
+/**
+ * Edge between two box borders, curved so lines do not cut through boxes.
+ * `bend` fans apart the several keys that can join the same pair of tables
+ * (properties → classes is both domain_class_id and range_class_id), which
+ * otherwise draw on top of each other with unreadable overlapping labels.
+ */
+function edgePath(s, t, bend) {
+  const dx = t.x - s.x, dy = t.y - s.y;
+  const clip = (n, ux, uy) => {
+    const hw = n.w / 2 + 4, hh = n.h / 2 + 4;
+    const scale = Math.min(hw / (Math.abs(ux) || 1e-6), hh / (Math.abs(uy) || 1e-6));
+    return [n.x + ux * scale, n.y + uy * scale];
+  };
+  const len = Math.hypot(dx, dy) || 1;
+  const [x1, y1] = clip(s, dx / len, dy / len);
+  const [x2, y2] = clip(t, -dx / len, -dy / len);
+  const curve = 0.12 + (bend || 0) * 0.22;
+  const mx = (x1 + x2) / 2 + (y2 - y1) * curve;
+  const my = (y1 + y2) / 2 - (x2 - x1) * curve;
+  // Label sits ON the curve (a quadratic's midpoint), not on the chord.
+  const lx = (x1 + 2 * mx + x2) / 4;
+  const ly = (y1 + 2 * my + y2) / 4;
+  return { d: `M${x1},${y1} Q${mx},${my} ${x2},${y2}`, mx: lx, my: ly - 3 };
+}
+
+/** Fan index for each link, so repeated pairs curve differently. */
+function assignBends(links) {
+  const seen = new Map();
+  for (const l of links) {
+    const key = [l.s.name, l.t.name].sort().join(' ');
+    const n = seen.get(key) || 0;
+    seen.set(key, n + 1);
+    // 0, +1, -1, +2, -2 … spreads them either side of the direct line.
+    l.bend = n === 0 ? 0 : (n % 2 ? Math.ceil(n / 2) : -Math.ceil(n / 2));
+  }
+}
+
+function drawSchema() {
+  if (!db) return;
+  $('pager').hidden = true;
+  try {
+    const { nodes, links } = readSchema();
+    if (!nodes.length) { $('out').innerHTML = '<div class="pad muted">No tables.</div>'; return; }
+    assignBends(links);
+    layout(nodes, links);
+
+    const pad = 60;
+    const minX = Math.min(...nodes.map(n => n.x - n.w / 2)) - pad;
+    const minY = Math.min(...nodes.map(n => n.y - n.h / 2)) - pad;
+    const maxX = Math.max(...nodes.map(n => n.x + n.w / 2)) + pad;
+    const maxY = Math.max(...nodes.map(n => n.y + n.h / 2)) + pad;
+
+    const edges = links.map(l => {
+      const { d, mx, my } = edgePath(l.s, l.t, l.bend);
+      return `<path class="fk" d="${d}" marker-end="url(#arrow)"></path>` +
+             `<text class="fklabel" x="${mx}" y="${my}" text-anchor="middle">${esc(l.label)}</text>`;
+    }).join('');
+
+    const boxes = nodes.map((n, i) => {
+      const x = n.x - n.w / 2, y = n.y - n.h / 2;
+      const cols = n.cols.map((c, k) =>
+        `<text class="${c.pk ? 'pk' : 'col'}" x="${x + 9}" y="${y + 38 + k * 14}">` +
+        `${esc(c.pk ? '• ' + c.name : c.name)}` +
+        `<tspan class="col" dx="6">${esc(c.type.toLowerCase())}</tspan></text>`).join('');
+      return `<g class="node" data-i="${i}">` +
+             `<rect class="box" x="${x}" y="${y}" width="${n.w}" height="${n.h}"></rect>` +
+             `<rect class="hdr" x="${x}" y="${y}" width="${n.w}" height="22"></rect>` +
+             `<text class="hdrt" x="${x + 9}" y="${y + 15}">${esc(n.name)}</text>` +
+             cols + `</g>`;
+    }).join('');
+
+    $('out').innerHTML =
+      `<svg class="er" viewBox="${minX} ${minY} ${maxX - minX} ${maxY - minY}">` +
+      `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
+      `<path d="M0,0 L10,5 L0,10 z" fill="currentColor" opacity=".55"/></marker></defs>` +
+      `<g id="erRoot">${edges}${boxes}</g></svg>`;
+
+    // Drag a table to tidy the layout by hand; edges follow.
+    const svg = $('out').querySelector('svg.er');
+    let dragging = null, start = null;
+    svg.addEventListener('pointerdown', (e) => {
+      const g = e.target.closest('g.node');
+      if (!g) return;
+      dragging = nodes[Number(g.dataset.i)];
+      const p = svgPoint(svg, e);
+      start = { px: p.x, py: p.y, x: dragging.x, y: dragging.y };
+      svg.setPointerCapture(e.pointerId);
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const p = svgPoint(svg, e);
+      dragging.x = start.x + (p.x - start.px);
+      dragging.y = start.y + (p.y - start.py);
+      redraw(svg, nodes, links);
+    });
+    svg.addEventListener('pointerup', () => { dragging = null; });
+  } catch (e) { showError(e); }
+}
+
+function svgPoint(svg, e) {
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function redraw(svg, nodes, links) {
+  const gs = svg.querySelectorAll('g.node');
+  nodes.forEach((n, i) => {
+    const g = gs[i];
+    const x = n.x - n.w / 2, y = n.y - n.h / 2;
+    const [box, hdr] = g.querySelectorAll('rect');
+    box.setAttribute('x', x); box.setAttribute('y', y);
+    hdr.setAttribute('x', x); hdr.setAttribute('y', y);
+    const texts = g.querySelectorAll('text');
+    texts[0].setAttribute('x', x + 9); texts[0].setAttribute('y', y + 15);
+    for (let k = 1; k < texts.length; k++) {
+      texts[k].setAttribute('x', x + 9);
+      texts[k].setAttribute('y', y + 38 + (k - 1) * 14);
+    }
+  });
+  const paths = svg.querySelectorAll('path.fk');
+  const labels = svg.querySelectorAll('text.fklabel');
+  links.forEach((l, i) => {
+    const { d, mx, my } = edgePath(l.s, l.t, l.bend);
+    paths[i].setAttribute('d', d);
+    labels[i].setAttribute('x', mx); labels[i].setAttribute('y', my);
+  });
 }
 
 function run() {
