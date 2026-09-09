@@ -118,6 +118,66 @@ nothing and that panel shows no results. Acceptable for now (the term-store
 sync itself is a separate concern); revisit if/when ontology→term-store
 publishing returns.
 
+## Publishing: master and live copy are two different files
+
+**Decided 2026-09-15.** The editor cannot be assumed to live on a site the
+whole organisation can read, so a single shared file is not an option: there
+are two copies.
+
+| | Where | Who |
+|---|---|---|
+| **Master** | the editor's site, e.g. `<editor-site>/Shared Documents/Ontology/<name>.sqlite` | editors read+write |
+| **Live copy** | a site everyone can read (hosting TBD — IKM / EIK / DPEx Shared Workspace per NWR-40260) | everyone reads; editors write so they can publish |
+
+**Save ≠ Publish.** Save writes the master (a working copy, invisible to
+readers). Publish copies it to the live location. Editors can therefore work
+through a series of changes without the organisation seeing half-finished
+states.
+
+### Where the publish target is remembered
+
+In the master file itself, as `publish_target` in `import_metadata` — NOT in
+the web part's properties. The target belongs to the ontology, not to the page
+it happens to be opened on: open the same file from any page or machine and it
+still knows where it publishes, and two ontologies can publish to different
+places. A web-part property supplies the default for files that have no target
+yet. (Known gap: `import_metadata` is not carried through a Turtle export, so
+a re-imported .ttl needs its target set again.)
+
+The target is a **full absolute URL** including site, folder and file name,
+because the live copy is normally on a different site collection.
+
+### How "is the live copy current?" is answered
+
+Not by comparing file timestamps — those are skewed by clocks and touched by
+unrelated events. Instead the editor stamps the master at publish time:
+
+- `published_change_id` — `MAX(changes.id)` at the moment of publishing
+- `published_at`, `published_to`, `published_by`
+
+Because every edit is journalled to `changes`, the question "are there
+unpublished edits?" is then answerable **from the master alone**:
+`MAX(changes.id) > published_change_id`, and the difference is how many.
+The live copy carries the same stamp, so reading it tells you exactly which
+revision of the master is live.
+
+This gives the status strip a third state alongside the existing red unsaved
+badge: unsaved → saved but not published → live.
+
+### Required alongside: the viewer must revalidate its cache
+
+The viewer caches the database in IndexedDB for 12 hours without checking the
+server, so without a change a publish would take up to a day to reach readers
+— which would make "Publish" a lie. The viewer must compare the file's ETag /
+Last-Modified before reusing a cached copy, and refetch when it differs.
+
+### Publish-time safeguards
+
+- Run the existing integrity checks before writing the live copy, so a broken
+  ontology cannot go organisation-wide.
+- Publish into a library with versioning enabled: rollback and publish history
+  come free.
+
 ## The update process (the instructions the ticket asks for)
 
 Once implemented, the process for content owners:

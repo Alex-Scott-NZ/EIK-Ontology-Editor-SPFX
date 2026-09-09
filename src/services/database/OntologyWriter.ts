@@ -44,6 +44,18 @@ export interface ILabelFlagEdit {
   [predicateUri: string]: string | undefined;
 }
 
+/** Where this ontology publishes, and how current the live copy is. */
+export interface IPublishState {
+  /** Absolute URL of the live copy, including site, folder and file name. */
+  target: string | undefined;
+  /** Journal position the live copy was published from. */
+  publishedChangeId: number | undefined;
+  publishedAt: string | undefined;
+  publishedBy: string | undefined;
+  /** Edits made since the last publish. 0 = the live copy is current. */
+  unpublishedChanges: number;
+}
+
 /** What attachDatabase did, for the confirmation message and the journal. */
 export interface IAttachStats {
   conceptsAdded: number;
@@ -1321,6 +1333,68 @@ export class OntologyWriter {
       ...stats
     });
     return stats;
+  }
+
+  // -- publishing ------------------------------------------------------------
+  //
+  // The master and the copy the viewer reads are two different files, usually
+  // on two different sites (the editor's site is not necessarily readable by
+  // the whole organisation). These helpers record WHERE this ontology
+  // publishes and WHICH revision of it is currently live — both inside the
+  // file, so they travel with the ontology rather than with the page it is
+  // opened on.
+
+  /** Where this ontology publishes to, if it has been set. */
+  public getPublishTarget(): string | undefined {
+    const v = this._one("SELECT value FROM import_metadata WHERE key = 'publish_target'");
+    return v === undefined || v === null || String(v).trim() === '' ? undefined : String(v);
+  }
+
+  public setPublishTarget(url: string): void {
+    this._run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
+      ['publish_target', url.trim()]);
+    this._dirty = true;
+  }
+
+  /**
+   * Stamp the master as published. `published_change_id` is the journal
+   * position at this moment, which is what makes "are there unpublished
+   * edits?" answerable from the master alone — no need to fetch the live copy
+   * and no dependence on file timestamps or clock skew.
+   */
+  public markPublished(target: string): IPublishState {
+    const changeId = this.getLatestChangeId();
+    const at = new Date().toISOString();
+    const set = (k: string, v: string): void =>
+      this._run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)', [k, v]);
+    set('publish_target', target);
+    set('published_change_id', String(changeId));
+    set('published_at', at);
+    set('published_by', this._author);
+    this._dirty = true;
+    return { target, publishedChangeId: changeId, publishedAt: at, publishedBy: this._author, unpublishedChanges: 0 };
+  }
+
+  /** Highest journal id, i.e. the revision the working copy is at. */
+  public getLatestChangeId(): number {
+    const v = this._one('SELECT COALESCE(MAX(id), 0) FROM changes');
+    return Number(v || 0);
+  }
+
+  /** What is live, and how far the master has moved on since. */
+  public getPublishState(): IPublishState {
+    const str = (k: string): string | undefined => {
+      const v = this._one('SELECT value FROM import_metadata WHERE key = ?', [k]);
+      return v === undefined || v === null ? undefined : String(v);
+    };
+    const publishedChangeId = Number(str('published_change_id') || 0);
+    return {
+      target: this.getPublishTarget(),
+      publishedChangeId: publishedChangeId || undefined,
+      publishedAt: str('published_at'),
+      publishedBy: str('published_by'),
+      unpublishedChanges: Math.max(0, this.getLatestChangeId() - publishedChangeId)
+    };
   }
 
   // -- change log ------------------------------------------------------------

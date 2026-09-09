@@ -109,9 +109,10 @@ export class FileService {
    * every later one failed). Only the LAST segment is created — the parent
    * library must exist, which "Shared Documents" always does.
    */
-  public async ensureFolder(serverRelativePath: string): Promise<void> {
+  public async ensureFolder(serverRelativePath: string, webUrl?: string): Promise<void> {
+    const web = (webUrl || this._webUrl).replace(/\/+$/, '');
     const checkUrl =
-      `${this._webUrl}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
+      `${web}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
       `${encodePath(odataLiteral(serverRelativePath))}')/Exists`;
     try {
       const check: SPHttpClientResponse = await this._context.spHttpClient.get(
@@ -126,7 +127,7 @@ export class FileService {
     }
 
     const createUrl =
-      `${this._webUrl}/_api/web/Folders/AddUsingPath(decodedurl='` +
+      `${web}/_api/web/Folders/AddUsingPath(decodedurl='` +
       `${encodePath(odataLiteral(serverRelativePath))}')`;
     const response: SPHttpClientResponse = await this._context.spHttpClient.post(
       createUrl, SPHttpClient.configurations.v1, {}
@@ -140,14 +141,19 @@ export class FileService {
    * Write bytes to a library folder, overwriting. SharePoint's AddUsingPath
    * caps a single POST at 250 MB; the ontology database is ~30 MB so a chunked
    * upload is not needed yet.
+   *
+   * `webUrl` targets a DIFFERENT site than the one hosting the editor — used
+   * when publishing, because the copy the whole organisation reads normally
+   * lives on another site collection. Omit it to write to the current site.
    */
   public async writeFile(
     folderPath: string,
     fileName: string,
-    bytes: ArrayBuffer | Uint8Array
+    bytes: ArrayBuffer | Uint8Array,
+    webUrl?: string
   ): Promise<void> {
     const url =
-      `${this._webUrl}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
+      `${(webUrl || this._webUrl).replace(/\/+$/, '')}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
       `${encodePath(odataLiteral(folderPath))}')/Files/AddUsingPath(` +
       `decodedurl='${encodeURIComponent(odataLiteral(fileName))}',overwrite=true)`;
 
@@ -166,6 +172,42 @@ export class FileService {
       throw new Error(`Could not write ${fileName} — HTTP ${response.status} ${response.statusText}`);
     }
   }
+}
+
+/**
+ * Split a full publish URL into the pieces the write APIs need.
+ *
+ * The live copy normally sits on a different site collection from the editor,
+ * so a publish target is stored as one absolute URL
+ * (`https://tenant.sharepoint.com/sites/knowledge/Shared Documents/Ontology/ir.sqlite`).
+ * `sitePath` is the part of the path that identifies the web — everything up
+ * to and including `/sites/<name>` or `/teams/<name>`, else the host root.
+ */
+export function parsePublishTarget(target: string): {
+  webUrl: string;
+  folderPath: string;
+  fileName: string;
+} {
+  const url = new URL(target.trim());
+  const segments = decodeURIComponent(url.pathname).split('/').filter(Boolean);
+  if (segments.length < 2) {
+    throw new Error(`"${target}" does not include a folder and file name.`);
+  }
+
+  const managed = segments[0] === 'sites' || segments[0] === 'teams';
+  const webSegments = managed ? segments.slice(0, 2) : [];
+  const rest = segments.slice(webSegments.length);
+  if (rest.length < 2) {
+    throw new Error(`"${target}" needs at least a folder and a file name after the site.`);
+  }
+
+  const fileName = rest[rest.length - 1];
+  const folderSegments = rest.slice(0, -1);
+  return {
+    webUrl: `${url.origin}${webSegments.length ? '/' + webSegments.join('/') : ''}`,
+    folderPath: '/' + [...webSegments, ...folderSegments].join('/'),
+    fileName
+  };
 }
 
 /** Read a File chosen through an <input type="file"> as text. */

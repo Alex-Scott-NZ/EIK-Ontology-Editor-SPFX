@@ -848,6 +848,88 @@ export const ExportBranchDialog: React.FC<{
   );
 };
 
+/* ------------------------------------------------------------- publish -- */
+
+export const PublishDialog: React.FC<{
+  /** Where this ontology currently publishes, if set. */
+  target?: string;
+  /** Suggested target when none is set yet. */
+  suggestion: string;
+  unpublishedChanges: number;
+  publishedAt?: string;
+  publishedBy?: string;
+  unsavedChanges: number;
+  onPublish: (target: string) => void;
+  onCancel: () => void;
+  error?: string;
+  busy?: string;
+}> = ({ target, suggestion, unpublishedChanges, publishedAt, publishedBy,
+        unsavedChanges, onPublish, onCancel, error, busy }) => {
+  const [url, setUrl] = React.useState(target || suggestion);
+  const valid = /^https:\/\/[^\s]+\/[^\s/]+\/[^\s/]+$/i.test(url.trim());
+
+  return (
+    <Dialog
+      hidden={false}
+      onDismiss={busy ? () => undefined : onCancel}
+      dialogContentProps={{
+        type: DialogType.normal,
+        title: 'Publish to the viewer',
+        subText:
+          'Publishing copies this ontology to the location the Ontology Viewer ' +
+          'reads. That is a different file from the one you Save — saving keeps ' +
+          'your work in progress private until you publish it.'
+      }}
+      modalProps={{ isBlocking: true }}
+      minWidth={620}
+    >
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      {unsavedChanges > 0 && (
+        <MessageBar messageBarType={MessageBarType.warning} isMultiline>
+          You have {unsavedChanges} unsaved change{unsavedChanges === 1 ? '' : 's'}.
+          Publishing sends what is on screen now, including those — but Save
+          first if you want the master to match what readers get.
+        </MessageBar>
+      )}
+
+      {busy ? (
+        <Spinner size={SpinnerSize.large} label={busy} />
+      ) : (
+        <>
+          <TextField
+            label="Published copy (full URL, including the file name)"
+            required
+            autoFocus
+            value={url}
+            onChange={(_, v) => setUrl(v || '')}
+            description="Everyone who uses the viewer needs read access here; you need write access."
+            errorMessage={url.trim() && !valid ? 'Expected https://…/<site>/<folder>/<file>.sqlite' : undefined}
+          />
+
+          <p className={styles.muted}>
+            {publishedAt
+              ? `Last published ${new Date(publishedAt).toLocaleString()}` +
+                (publishedBy ? ` by ${publishedBy}` : '') + '. ' +
+                (unpublishedChanges > 0
+                  ? `${unpublishedChanges} change${unpublishedChanges === 1 ? '' : 's'} since then.`
+                  : 'The live copy is up to date.')
+              : 'This ontology has not been published yet.'}
+          </p>
+        </>
+      )}
+
+      <DialogFooter>
+        <PrimaryButton
+          text="Publish" disabled={!valid || !!busy}
+          onClick={() => onPublish(url.trim())}
+        />
+        <DefaultButton text="Cancel" disabled={!!busy} onClick={onCancel} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
 /* ------------------------------------------------------ attach ontology -- */
 
 export const AttachOntologyDialog: React.FC<{

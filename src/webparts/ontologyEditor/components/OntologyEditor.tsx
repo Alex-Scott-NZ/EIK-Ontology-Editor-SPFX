@@ -17,18 +17,18 @@ import { WalkthroughPanel } from './WalkthroughPanel';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { exportTurtle } from '../../../services/export/TurtleExporter';
 import { getSqlJs } from '../../../services/database/sqlJsLoader';
-import { OntologyWriter, ValidationFailure, ILabelFlagEdit, IAttachStats } from '../../../services/database/OntologyWriter';
-import { importTurtle, ImportPhase } from '../../../services/import/OntologyImporter';
+import { OntologyWriter, ValidationFailure, ILabelFlagEdit, IAttachStats, IPublishState } from '../../../services/database/OntologyWriter';
+import { importTurtle, ImportPhase, runChecks, INTEGRITY_CHECKS } from '../../../services/import/OntologyImporter';
 import {
   FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes,
-  defaultOntologyFolder
+  defaultOntologyFolder, parsePublishTarget
 } from '../../../services/sharepoint/FileService';
 import { IOntologyStats, ITreeNode, ILabel, IAnnotation, IConcept } from '../../../models/IOntology';
 import { IConceptEditHandlers } from './ConceptDetail';
 import {
   NewConceptDialog, ConceptPickerDialog, LabelDialog, AnnotationDialog,
   RenamePrompt, PropertyPicker, ConfirmDialog, NewPropertyDialog, ChangeClassDialog,
-  SaveAsDialog, ExportBranchDialog, AttachOntologyDialog
+  SaveAsDialog, ExportBranchDialog, AttachOntologyDialog, PublishDialog
 } from './ConceptDialogs';
 import { localName } from '../../../services/turtle/Vocabulary';
 
@@ -49,6 +49,7 @@ type DialogState =
   | { kind: 'editAnnotation'; annotation: IAnnotation }
   | { kind: 'confirmDelete'; node: ITreeNode; impact: string }
   | { kind: 'saveAs' }
+  | { kind: 'publish' }
   | { kind: 'exportBranch' }
   | { kind: 'attachOntology' }
   | { kind: 'confirm'; title: string; message: string; act: () => void };
@@ -111,6 +112,10 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [notice, setNotice] = React.useState<string | undefined>(undefined);
   // Progress text shown INSIDE the attach dialog while its source loads/merges.
   const [attachBusy, setAttachBusy] = React.useState<string | undefined>(undefined);
+  // Progress shown inside the publish dialog while it copies to the live site.
+  const [publishBusy, setPublishBusy] = React.useState<string | undefined>(undefined);
+  // Where this ontology publishes and how stale the live copy is.
+  const [publishState, setPublishState] = React.useState<IPublishState | undefined>(undefined);
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
   const [dialogError, setDialogError] = React.useState<string | undefined>(undefined);
   // Views memoise their queries; bumping this refetches after a mutation.
@@ -153,6 +158,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     // it was saved by definition, so the unsaved baseline starts there.
     setPendingChanges(w.getChangeCount());
     setSavedChanges(w.getChangeCount());
+    setPublishState(w.getPublishState());
     setRefreshToken(t => t + 1);
     setStage('ready');
   }, [context]);
@@ -350,6 +356,56 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     setDialog({ kind: 'none' });
     setDialogError(undefined);
   }, []);
+  /**
+   * Copy the current ontology to the location the viewer reads.
+   *
+   * Publishing is deliberately separate from Save: Save writes the master on
+   * this (possibly restricted) site, publish makes a copy visible to everyone.
+   * The target and the journal position it was published from are recorded IN
+   * the file, so the ontology carries its own publishing history.
+   */
+  const publishToViewer = React.useCallback(async (target: string): Promise<void> => {
+    if (!db || !writer || !fileService) return;
+    setPublishBusy('Checking the ontology…');
+    try {
+      setDialogError(undefined);
+      await yieldToBrowser();
+
+      // Never send a structurally broken ontology organisation-wide.
+      const failures = runChecks(db.raw, INTEGRITY_CHECKS).filter(c => !c.ok);
+      if (failures.length) {
+        throw new Error(
+          'Integrity checks failed, so nothing was published: ' +
+          failures.map(f => `${f.label} = ${f.value}`).join('; ')
+        );
+      }
+
+      const { webUrl, folderPath, fileName: targetName } = parsePublishTarget(target);
+
+      setPublishBusy('Publishing…');
+      writer.releaseUndoPoints();
+      // Stamp BEFORE exporting so the published bytes carry their own identity:
+      // reading the live copy then tells you exactly which revision it is.
+      const state = writer.markPublished(target);
+      const bytes = db.export();
+
+      await fileService.ensureFolder(folderPath, webUrl);
+      await fileService.writeFile(folderPath, targetName, bytes, webUrl);
+
+      setPublishState(state);
+      refreshAfterChange();
+      closeDialog();
+      setNotice(
+        `Published to ${targetName}. Everyone using the viewer sees this version ` +
+        'from their next page load.'
+      );
+    } catch (e) {
+      setDialogError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishBusy(undefined);
+    }
+  }, [db, writer, fileService, refreshAfterChange, closeDialog]);
+
   /**
    * Export the selected concept's branch as a standalone ontology. The .ttl is
    * serialised straight from the filtered exporter; the .sqlite flavour is that
@@ -594,6 +650,20 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       key: 'saveAs', text: 'Save as…', iconProps: { iconName: 'SaveAs' },
       onClick: () => { setDialog({ kind: 'saveAs' }); }
     },
+    ...(fileService ? [{
+      key: 'publish',
+      text: publishState && publishState.unpublishedChanges > 0
+        ? `Publish (${publishState.unpublishedChanges} unpublished)`
+        : 'Publish…',
+      iconProps: {
+        iconName: 'PublishContent',
+        style: publishState && publishState.unpublishedChanges > 0 ? { color: '#8a6100' } : undefined
+      },
+      title: publishState && publishState.target
+        ? `Copies this ontology to ${publishState.target} for the viewer`
+        : 'Copy this ontology to the location the Ontology Viewer reads',
+      onClick: () => { setDialog({ kind: 'publish' }); }
+    }] : []),
     {
       key: 'exportTtl', text: 'Export Turtle…', iconProps: { iconName: 'Export' },
       title: 'Downloads the whole ontology as a Semaphore-compatible .ttl (includes unsaved changes)',
@@ -716,6 +786,18 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
           {unsaved > 0 && (
             <span className={styles.unsavedBadge}>
               ● {unsaved} unsaved change{unsaved === 1 ? '' : 's'}
+            </span>
+          )}
+          {/* Saved and published are different things: the master lives here,
+              the copy the organisation reads lives wherever publish sends it. */}
+          {publishState && publishState.target && publishState.unpublishedChanges > 0 && (
+            <span className={styles.unpublishedBadge} title={`Live copy: ${publishState.target}`}>
+              ● {publishState.unpublishedChanges} not published
+            </span>
+          )}
+          {publishState && publishState.target && publishState.unpublishedChanges === 0 && unsaved === 0 && (
+            <span className={styles.publishedBadge} title={`Live copy: ${publishState.target}`}>
+              ● published
             </span>
           )}
         </div>
@@ -880,6 +962,26 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             onSaveToSharePoint={(name) => { closeDialog(); void saveToLibrary(name); }}
           />
         );
+
+      case 'publish': {
+        const suggested = publishState && publishState.target
+          ? publishState.target
+          : `${context ? context.pageContext.web.absoluteUrl : ''}/${(effectiveFolder.split('/').filter(Boolean).slice(-2).join('/')) || 'Shared Documents/Ontology'}/${fileName}`;
+        return (
+          <PublishDialog
+            target={publishState ? publishState.target : undefined}
+            suggestion={suggested}
+            unpublishedChanges={publishState ? publishState.unpublishedChanges : 0}
+            publishedAt={publishState ? publishState.publishedAt : undefined}
+            publishedBy={publishState ? publishState.publishedBy : undefined}
+            unsavedChanges={unsaved}
+            error={dialogError}
+            busy={publishBusy}
+            onCancel={closeDialog}
+            onPublish={(t) => { void publishToViewer(t); }}
+          />
+        );
+      }
 
       case 'exportBranch': {
         const current = db.getConcept(selectedId as number);

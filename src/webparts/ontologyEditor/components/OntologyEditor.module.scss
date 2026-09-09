@@ -134,6 +134,19 @@
   color: "[theme:redDark, default:#a4262c]";
 }
 
+/* Saved to the master, but the copy the organisation reads is behind. Amber:
+   nothing is at risk of being lost, readers are just seeing an older version. */
+.unpublishedBadge {
+  font-weight: 600;
+  color: "[theme:orangeLighter, default:#8a6100]";
+}
+
+/* Master saved AND the live copy matches it. */
+.publishedBadge {
+  font-weight: 600;
+  color: "[theme:green, default:#107c10]";
+}
+
 .panes {
   display: flex;
   gap: 12px;
