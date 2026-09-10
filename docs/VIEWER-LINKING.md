@@ -239,6 +239,27 @@ New dependency footprint: zero.
 - Publish into a library with versioning enabled: rollback and publish history
   come free.
 
+### What Publish actually writes (measured 2026-09-10)
+
+**Publish touches TWO files, not one.** Besides the published copy, it
+**re-saves the master** so the publish stamp (`publish_target`,
+`published_change_id`) survives closing and reopening the ontology. On the dev
+run the published copy was written at 15:24:53 and the master at 15:24:58 —
+five seconds later, same size, bumping the master from version 1.0 to 2.0.
+Expect the master's Modified date and version to move even when you have made
+no edits and never pressed Save.
+
+**Recovery model — overwrites do NOT go to the recycle bin.** The recycle bin
+only catches deletes. An overwrite creates a new *version*; the previous
+content survives only if the library has versioning on, and is otherwise gone.
+Both dev libraries have versioning enabled with `MajorVersionLimit = 500`, so
+every prior master is restorable from the file's version history. **Confirm
+versioning is enabled on the production libraries before the first publish** —
+it is the only thing standing between a mis-targeted publish and a lost master.
+
+Publishing to a path that does not yet exist simply creates the file at version
+1.0, overwriting nothing.
+
 ## The update process (the instructions the ticket asks for)
 
 Once implemented, the process for content owners:
