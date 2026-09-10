@@ -173,16 +173,64 @@ Last-Modified before reusing a cached copy, and refetch when it differs.
 
 ### Constraint this puts on the hosting decision
 
-The viewer reads from **its own site** — `pageContext.web.absoluteUrl` plus the
-folder property; it has no notion of reading across site collections. So:
+> **SUPERSEDED 2026-09-10 — the viewer CAN read across site collections.**
+> `DataLoaderService` gained `isAbsoluteFolder` / `webUrlForFolder` /
+> `buildFileUrl`, so `libraryFolder` accepts either a server-relative folder on
+> the viewer's own site *or* an absolute URL into any site collection.
+> **Proven live:** a viewer page on `/sites/dpex-testing` was pointed at
+> `https://5pbdxb.sharepoint.com/sites/AlexScott'sTest/Shared Documents/Ontology`
+> + `A02 Aquaculture.sqlite`; it issued
+> `/sites/AlexScott'sTest/_api/web/GetFileByServerRelativePath(...)` (correctly
+> doubling the apostrophe for the OData literal), loaded the file and searched
+> it, with no errors. So the hosting decision below is NOT forced — the
+> published copy may live on a different site from the viewer page, provided
+> readers can read *that* site.
+>
+> What is still missing is **discoverability**: the absolute URL has to be
+> typed by hand. See "Browse picker" below.
 
-> the site hosting the **viewer page** must be the site holding the
-> **published copy**, and that site must be readable by everyone.
+The paragraph below is retained for history and no longer describes the code:
 
-The editor publishes *out* across sites (verified), but the viewer only reads
-*locally*. That is the right split — readers never need access to the editor's
-site — but it means choosing the viewer's home site and the published file's
-location is a single decision, not two.
+~~The viewer reads from **its own site** — `pageContext.web.absoluteUrl` plus the
+folder property; it has no notion of reading across site collections. So the
+site hosting the **viewer page** must be the site holding the **published
+copy**. The editor publishes *out* across sites (verified), but the viewer only
+reads *locally*.~~
+
+### Browse picker (not built)
+
+Today `libraryFolder` + `sqliteFileName` are typed into the web part's own
+settings UI (`AdminPanel.tsx`, "Data Settings" — note the web part returns an
+empty `getPropertyPaneConfiguration()`, so this is a plain React surface, not
+property-pane plumbing). A site → library → file picker would remove the need
+to know URLs. Survey of what already exists in the sibling repos, 2026-09-10:
+
+- **`SiteSelector` + `useSiteSelector`** (IKM-Checklist-Planner-WebPart, also
+  duplicated in IKM-Admin-Panel-WebPart and IKM-Checklist-ToDo-WebPart) — a
+  Fluent `Pivot` with "Select via Hub" and "Enter URL Directly" tabs, emitting
+  an absolute site URL. Genuinely cross-site via `_api/HubSites` and
+  `_api/v2.1/sites?$filter=sharepointIds/hubSiteId eq '<id>'`. ~385 lines
+  total, depends only on `@fluentui/react` + `@microsoft/sp-http` — both
+  already present. Surfaces hub-associated sites only; the URL tab covers the
+  rest.
+- **IKM-Extension-Manager-Admin-WebPart** has the only full Hub → Site →
+  List/File wizard, including `_splitLibraryUrl` and a cross-site file listing
+  via `GetFolderByServerRelativeUrl(...)/Files`. Embedded in a ~4,000-line
+  component, so useful as a design reference and a source for those fetches
+  rather than a direct port.
+- **IKM-WIP-Processing-WebPart `SharePointService`** lists libraries on an
+  arbitrary site, but via PnPjs (`spfi(siteUrl)`), which this repo does not
+  depend on — re-express with `SPHttpClient` instead of adding the dependency.
+- `@pnp/spfx-property-controls` **is already in this repo's package.json
+  (3.21.0) but never imported**. Its `PropertyFieldFilePicker` is current-site
+  only for browsing, so it does not solve the cross-site case anyway.
+
+Minimal port: `SiteSelector` + two small `SPHttpClient` hooks —
+`useLibraryBrowser(siteUrl)` against
+`_api/web/lists?$filter=Hidden eq false and BaseType eq 1` and
+`useFileBrowser(siteUrl, folder)` against
+`_api/web/GetFolderByServerRelativePath(...)/Files` filtered to `.sqlite`.
+New dependency footprint: zero.
 
 ### Publish-time safeguards
 
