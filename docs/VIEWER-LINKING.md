@@ -221,6 +221,56 @@ Operational prerequisites for anyone who will SAVE:
    cache, reload viewer, confirm the change shows.
 5. Only then: production deployment (site TBD per NWR-40260's hosting AC).
 
+### Round trip verified end to end — 2026-09-10
+
+Steps 1-3 were covered by `IKM-Ontology-WebPart/docs/SCHEMA-MIGRATION-BASELINE.md`.
+The **publish → viewer** leg has now been run in full on the dev tenant:
+
+1. Opened `/sites/dpex-testing/Shared Documents/Ontology/InlandRevenueModel.sqlite`
+   in the editor — 10,788 concepts, 108 classes, 72 relationship types,
+   12,752 relationships, 10,826 hierarchy edges.
+2. **Publish…** → target
+   `https://5pbdxb.sharepoint.com/sites/dpex-testing/Ontology/InlandRevenueModel.sqlite`
+   (a genuinely separate library from the master). Reported *"Published to
+   InlandRevenueModel.sqlite. Everyone using the viewer sees this version from
+   their next page load."* File confirmed present, 30.10 MB.
+3. Pointed the viewer web part at it (`libraryFolder: Ontology`,
+   `sqliteFileName: InlandRevenueModel.sqlite`) and republished the page.
+4. Cleared the viewer's caches, hard-reloaded. Network trace shows the ETag
+   freshness probe against the new path followed by a 30,820 KB download of
+   the published copy — so the file it renders is the published one, not the
+   master and not a cached copy.
+5. Re-ran the six-term capture. **Search hit counts match the recorded
+   post-rewrite baseline exactly**: DPEx 1, Aquaculture 8, Bangladesh 1,
+   Annual return 4, Child support 72, Income tax 96. Graphs render for every
+   term. DPEx resolves to `InlandRevenueModel › Party › Inland Revenue › IR
+   business unit › Enterprise & Integrity Services › Enterprise Information &
+   Knowledge › Digital Product Experience`, Class **Party**, Level 6, parent
+   *Enterprise Information & Knowledge*, 2 siblings, 0 children — matching the
+   baseline's documented expectations, level 6 included.
+
+**Two things to carry into the production run:**
+
+- **`classColors` had to be remapped by hand.** The page's saved colours were
+  keyed to the legacy plural buckets (Parties, Activities, Objects…). The
+  editor schema uses singular class names, so every colour silently stopped
+  applying until the keys were rewritten (Parties→Party, Activities→Activity,
+  Objects→Object, Events→Event, Locations→Location, Topics→Topic, "Products
+  and services"→"Product or service"; Authority, Classification, Information
+  and Money are unchanged). Budget for re-picking these on any viewer page.
+- **`Set-PnPPageWebPart -PropertiesJson` REPLACES the property bag, it does not
+  merge.** A first pass sending only the four changed keys wiped
+  `virtualRootName`, `anchoredTermName`, `savedZoom`/pan and `adminPanelOpen`.
+  Always send the complete property set.
+
+**Product niggle found:** the Publish dialog pre-fills the published-copy URL
+with the *master's own path*, even though its own text says "That is a
+different file from the one you Save". Accepting the default therefore
+publishes back over the master — which on the real topology means writing to
+the restricted editor site rather than the org-readable one, and the viewer
+never sees a new file. The field should default to the remembered publish
+target, or be empty, rather than to the master path.
+
 ## Out of scope here
 
 - Edit-access gating (separate work item; design agreed: folder permissions
