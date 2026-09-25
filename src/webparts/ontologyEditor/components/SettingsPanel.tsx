@@ -57,6 +57,10 @@ export const SettingsPanel: React.FC<ISettingsPanelProps> = (props) => {
    * already reads and what the property's own description promises.
    */
   const applyFolder = (which: Exclude<Browsing, undefined>, absolute: string): void => {
+    // Dismiss FIRST. Closing the browser is a UI decision and must not depend on
+    // the save succeeding: when the commit threw, this line never ran and the
+    // dialog sat there with "Use this folder" looking broken.
+    setBrowsing(undefined);
     if (which === 'databaseUrl') {
       // This one is documented as server-relative and is only ever opened from
       // the site the editor runs on, so store it in the form the loader expects.
@@ -74,7 +78,6 @@ export const SettingsPanel: React.FC<ISettingsPanelProps> = (props) => {
       } catch { /* leave it absolute if it will not parse */ }
       onPropertyChange(which, value);
     }
-    setBrowsing(undefined);
   };
 
   const folderField = (
