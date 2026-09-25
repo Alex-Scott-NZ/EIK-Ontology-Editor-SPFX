@@ -1394,9 +1394,25 @@ export class OntologyWriter {
     return v === undefined || v === null || String(v).trim() === '' ? undefined : String(v);
   }
 
+  /**
+   * Set where this ontology publishes to.
+   *
+   * This is the AUTHORED destination, and the only writer of it besides
+   * `markPublished`, which merely stamps where a publish actually went.
+   *
+   * Journalled, for the same reason the hierarchy words are: `_dirty` alone
+   * does not show up as an unsaved change (that count comes from the journal),
+   * so without this an author could set the location, close the file and lose
+   * it with no warning.
+   */
   public setPublishTarget(url: string): void {
+    const before = this.getPublishTarget();
+    const next = url.trim();
+    if (before === next) return;
     this._run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
-      ['publish_target', url.trim()]);
+      ['publish_target', next]);
+    this._journal('update', 'broader', undefined,
+      { setting: 'publishTarget', from: before, to: next });
     this._dirty = true;
   }
 

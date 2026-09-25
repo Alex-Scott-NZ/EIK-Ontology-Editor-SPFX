@@ -204,8 +204,10 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
                   description: 'Server-relative path. Blank uses Shared Documents/Ontology.'
                 }),
                 PropertyPaneTextField('publishFolder', {
-                  label: 'Publish folder',
-                  description: 'Where Publish writes the reader\u2019s copy. May be on another site.'
+                  label: 'Default publish folder',
+                  description: 'Only used for an ontology that has never been published. ' +
+                               'After that the destination is stored in the file itself and ' +
+                               'changed from the Publish dialog.'
                 }),
                 PropertyPaneTextField('databaseUrl', {
                   label: 'Database URL',

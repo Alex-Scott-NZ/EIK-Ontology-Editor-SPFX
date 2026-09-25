@@ -1,6 +1,6 @@
 {
   "name": "eik-ontology-editor",
-  "version": "0.6.12.16",
+  "version": "0.6.12.19",
   "private": true,
   "engines": {
     "node": ">=22.14.0 < 23.0.0"
