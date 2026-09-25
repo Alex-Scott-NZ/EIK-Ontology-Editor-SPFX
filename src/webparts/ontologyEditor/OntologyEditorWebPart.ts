@@ -126,7 +126,14 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
     // immediately, then tell the pane, which is what actually gets it saved.
     // Harmless on the canvas, where the direct write alone would have done.
     if (this._commitViaPane) {
-      this._commitViaPane(property, value, true);
+      try {
+        this._commitViaPane(property, value, true);
+      } catch (e) {
+        // A commit failure must not escape into the UI. It used to: the caller
+        // closes its dialog on the line AFTER this one, so a throw here left the
+        // folder browser open with its button apparently dead.
+        console.error('[OntologyEditor] could not persist setting', property, e);
+      }
     }
     this.render();
   }
@@ -207,10 +214,24 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
                 PropertyPaneButton('openSettings', {
                   text: 'Open settings',
                   buttonType: PropertyPaneButtonType.Primary,
-                  onClick: () => {
+                  // Whatever this returns becomes the new value of the button's
+                  // target property, so it MUST return the incoming value and
+                  // never `this.properties` — that assigns the bag to a key
+                  // inside itself, and the self-reference makes the whole web
+                  // part unserializable:
+                  //
+                  //   TypeError: Converting circular structure to JSON
+                  //     --- property 'openSettings' closes the circle
+                  //
+                  // _internalSerialize starts with JSON.stringify(this.properties)
+                  // and runs BEFORE setDirty, so one click permanently kills
+                  // saving for the session and the 1s dirty-bit timer then throws
+                  // on every tick. Latent until 0.6.12.14: nothing serialised on
+                  // an App Page, so the circle was never walked.
+                  onClick: (value: unknown) => {
                     this._openSettingsToken += 1;
                     this.render();
-                    return this.properties;
+                    return value;
                   }
                 })
               ]
