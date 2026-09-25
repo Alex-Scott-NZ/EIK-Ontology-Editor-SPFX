@@ -443,17 +443,32 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       // progress, the published copy is what readers see. The default target
       // used to be exactly the master's own path, so this was one Enter away.
       const masterPath = revertSource && revertSource.path ? revertSource.path : undefined;
-      if (masterPath) {
-        let targetPath: string | undefined;
-        try { targetPath = decodeURIComponent(new URL(target.trim()).pathname); } catch { targetPath = undefined; }
-        if (targetPath && targetPath.toLowerCase() === masterPath.toLowerCase()) {
-          throw new Error(
-            'That is the master file this ontology was opened from, so publishing ' +
-            'there would overwrite your working copy with itself. Publish to a ' +
-            'different file — ideally a folder readers can see and authors cannot ' +
-            'edit. The Publish folder property sets the default.'
-          );
-        }
+      let targetPath: string | undefined;
+      try { targetPath = decodeURIComponent(new URL(target.trim()).pathname); } catch { targetPath = undefined; }
+      const folderOf = (path: string): string =>
+        path.substring(0, path.lastIndexOf('/')).replace(/\/+$/, '').toLowerCase();
+
+      if (masterPath && targetPath && targetPath.toLowerCase() === masterPath.toLowerCase()) {
+        throw new Error(
+          'That is the master file this ontology was opened from, so publishing ' +
+          'there would overwrite your working copy with itself. Choose a different ' +
+          'destination with Browse — ideally a folder readers can see and authors ' +
+          'cannot edit.'
+        );
+      }
+
+      // Same FOLDER, different name is not destructive, but it puts a reader's
+      // copy in among the masters and so gives up the permission split the two
+      // folders exist to create. Refused rather than warned: the master folder
+      // holds masters.
+      const masterFolder = masterPath ? folderOf(masterPath) : (effectiveFolder || '').replace(/\/+$/, '').toLowerCase();
+      if (targetPath && masterFolder && folderOf(targetPath) === masterFolder) {
+        throw new Error(
+          'That folder holds the master files. Publishing a reader\u2019s copy into ' +
+          'it means readers and authors share one location, which is the thing the ' +
+          'separate publish folder exists to avoid. Browse to a different folder — ' +
+          'one readers can see and authors cannot edit.'
+        );
       }
 
       // Never send a structurally broken ontology organisation-wide.
@@ -1119,19 +1134,24 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         );
 
       case 'publish': {
-        // A configured publish folder WINS over the target stored in the file.
-        // The stored target is where this ontology last went; the setting is
-        // where the author has now said published copies belong. Preferring the
-        // stored one made changing the setting do nothing for any ontology that
-        // had ever been published — which is every real one.
-        const suggested = publishFolder && publishFolder.trim()
-          ? `${publishFolderUrl}/${fileName}`
-          : (publishState && publishState.target
-              ? publishState.target
-              : `${publishFolderUrl}/${fileName}`);
+        // The destination belongs to the ONTOLOGY, not to the page it is edited
+        // on: it is stored in the file (import_metadata.publish_target) and
+        // changed from the publish dialog, so a given ontology keeps going to
+        // the same place whoever opens it and from wherever.
+        //
+        // The web part's publish folder is only a seed for an ontology that has
+        // never been given one. Once set, the file wins — including over the
+        // property — which is why the dialog lets the value be browsed and typed.
+        const suggested = publishState && publishState.target
+          ? publishState.target
+          : `${publishFolderUrl}/${fileName}`;
         return (
           <PublishDialog
             suggestion={suggested}
+            fileService={fileService}
+            siteUrl={context ? context.pageContext.web.absoluteUrl : ''}
+            storedTarget={publishState ? publishState.target : undefined}
+            onTargetChange={(t) => { mutate(() => { if (writer) writer.setPublishTarget(t); }); }}
             unpublishedChanges={publishState ? publishState.unpublishedChanges : 0}
             publishedAt={publishState ? publishState.publishedAt : undefined}
             publishedBy={publishState ? publishState.publishedBy : undefined}

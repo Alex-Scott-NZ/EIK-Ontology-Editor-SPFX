@@ -5,7 +5,8 @@ import {
   ChoiceGroup, IChoiceGroupOption, Label as FluentLabel, Checkbox, Spinner, SpinnerSize
 } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
-import { ILibraryFile } from '../../../services/sharepoint/FileService';
+import { FileService, ILibraryFile } from '../../../services/sharepoint/FileService';
+import FolderBrowser from './FolderBrowser';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import {
   ILabelFlagEdit, LABEL_FLAG_DEFINITIONS
@@ -865,6 +866,18 @@ export const PublishDialog: React.FC<{
    * One decision, in one place. The caller owns the precedence.
    */
   suggestion: string;
+  /** Lets the target be browsed for instead of typed. Absent = typing only. */
+  fileService?: FileService;
+  /** Absolute URL of the site to start browsing from. */
+  siteUrl: string;
+  /** The destination recorded in the file, if it has one. */
+  storedTarget?: string;
+  /**
+   * Persist a new destination INTO the ontology. Called when the author browses
+   * to one or finishes typing it — not on every keystroke, which would journal
+   * a change per character.
+   */
+  onTargetChange?: (target: string) => void;
   unpublishedChanges: number;
   publishedAt?: string;
   publishedBy?: string;
@@ -880,10 +893,35 @@ export const PublishDialog: React.FC<{
   problems?: IIntegrityProblem[];
   /** Select and reveal the concept a problem points at, then close this dialog. */
   onGoToProblem?: (problem: IIntegrityProblem) => void;
-}> = ({ suggestion, unpublishedChanges, publishedAt, publishedBy,
+}> = ({ suggestion, fileService, siteUrl, storedTarget, onTargetChange,
+        unpublishedChanges, publishedAt, publishedBy,
         unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem }) => {
   const [url, setUrl] = React.useState(suggestion);
   const [copied, setCopied] = React.useState(false);
+  const [browsing, setBrowsing] = React.useState(false);
+
+  /**
+   * The file name to keep when the author browses to a different folder.
+   *
+   * Taken from whatever is in the box rather than from a prop: if they have
+   * just edited the name by hand, browsing to a folder should not quietly
+   * revert it.
+   */
+  const fileName = ((): string => {
+    const raw = (url || '').trim().replace(/\/+$/, '');
+    const last = raw.split('/').filter(Boolean).pop() || '';
+    const decoded = ((): string => { try { return decodeURIComponent(last); } catch { return last; } })();
+    return /\.[A-Za-z0-9]+$/.test(decoded) ? decoded : 'ontology.sqlite';
+  })();
+
+  /** Server-relative folder of the current target, so Browse opens where it points. */
+  const startFolder = ((): string | undefined => {
+    try {
+      const path = decodeURIComponent(new URL(url.trim()).pathname);
+      const cut = path.lastIndexOf('/');
+      return cut > 0 ? path.substring(0, cut) : undefined;
+    } catch { return undefined; }
+  })();
   // Not a regex: SharePoint library names routinely contain spaces
   // ("Shared Documents"), apostrophes and ampersands. Parse it instead and
   // check the shape — an https URL with at least a folder and a file name.
@@ -899,6 +937,7 @@ export const PublishDialog: React.FC<{
   })();
 
   return (
+    <>
     <Dialog
       hidden={false}
       onDismiss={busy ? () => undefined : onCancel}
@@ -1013,10 +1052,20 @@ export const PublishDialog: React.FC<{
             autoFocus
             value={url}
             onChange={(_, v) => setUrl(v || '')}
-            description="Everyone who uses the viewer needs read access here; you need write access."
+            onBlur={() => { const t = url.trim(); if (t && t !== storedTarget && onTargetChange) onTargetChange(t); }}
+            description={storedTarget
+              ? 'Stored in this ontology, so it publishes here wherever it is opened. Everyone who uses the viewer needs read access; you need write access.'
+              : 'Not set for this ontology yet, so this is the editor\u2019s default. Browsing or editing it stores the choice in the file itself.'}
             errorMessage={url.trim() && !valid
               ? 'Expected a full https URL ending in a file name, e.g. https://tenant.sharepoint.com/sites/knowledge/Shared Documents/Ontology/ontology.sqlite'
               : undefined}
+          />
+          <DefaultButton
+            text="Browse…"
+            iconProps={{ iconName: 'FolderOpen' }}
+            disabled={!fileService}
+            onClick={() => setBrowsing(true)}
+            styles={{ root: { marginTop: 6, height: 28 } }}
           />
 
           <p className={styles.muted}>
@@ -1039,6 +1088,28 @@ export const PublishDialog: React.FC<{
         <DefaultButton text="Cancel" disabled={!!busy} onClick={onCancel} />
       </DialogFooter>
     </Dialog>
+
+      {/* Stacked over the publish dialog. Fluent layers the newest on top, so
+          the browser is usable without dismissing the publish dialog and losing
+          what has been typed. Folder mode: the file NAME stays whatever is in
+          the box, so browsing changes only where it goes. */}
+      {browsing && fileService && (
+        <FolderBrowser
+          fileService={fileService}
+          initialWebUrl={siteUrl}
+          initialFolder={startFolder}
+          onPick={(absolute) => {
+            const next = `${absolute.replace(/\/+$/, '')}/${fileName}`;
+            setUrl(next);
+            setBrowsing(false);
+            // Store it on the ontology straight away. Browsing is an explicit
+            // choice of destination, not a preview of one.
+            if (next !== storedTarget && onTargetChange) onTargetChange(next);
+          }}
+          onCancel={() => setBrowsing(false)}
+        />
+      )}
+    </>
   );
 };
 
