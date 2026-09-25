@@ -5,7 +5,11 @@ import {
   IPropertyPaneConfiguration,
   PropertyPaneButton,
   PropertyPaneButtonType,
-  PropertyPaneLabel
+  PropertyPaneLabel,
+  PropertyPaneTextField,
+  PropertyPaneFieldType,
+  IPropertyPaneField,
+  IPropertyPaneCustomFieldProps
 } from '@microsoft/sp-property-pane';
 import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
 import { IReadonlyTheme } from '@microsoft/sp-component-base';
@@ -38,6 +42,38 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
    */
   private _openSettingsToken: number = 0;
 
+  /**
+   * The property pane's own "a field changed" callback, captured from a custom
+   * field's onRender.
+   *
+   * This is the ONLY way a change made outside the pane reaches the page on a
+   * single-part App Page. On the modern canvas, writing `this.properties`
+   * directly is enough: a host timer serialises every web part once a second,
+   * diffs it and marks the page dirty. The App Page host does not do that, so
+   * Save writes nothing and the page version does not even move — measured both
+   * ways on 1.21.1, and a known unfixed limitation since 2019 (sp-dev-docs
+   * #4410, #4456, #4550). A pane-originated change IS persisted there, hence
+   * this route.
+   *
+   * Undefined whenever the pane is closed, because the field is then unmounted.
+   */
+  private _commitViaPane:
+    | ((targetProperty?: string, newValue?: unknown, isValidEntry?: boolean) => void)
+    | undefined = undefined;
+
+  /**
+   * Make sure the commit channel exists before the author changes anything.
+   *
+   * A class property rather than a method so its identity is stable: the
+   * component effect that calls this is keyed on the panel's open state, and a
+   * fresh closure each render would defeat that.
+   */
+  private readonly _ensurePaneOpen = (): void => {
+    if (!this.context.propertyPane.isPropertyPaneOpen()) {
+      this.context.propertyPane.open();
+    }
+  };
+
   public render(): void {
     const element: React.ReactElement<IOntologyEditorProps> = React.createElement(
       OntologyEditor,
@@ -46,6 +82,7 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
         libraryFolder: this.properties.libraryFolder,
         publishFolder: this.properties.publishFolder,
         onPropertyChange: this._onSettingChange.bind(this),
+        onSettingsOpened: this._ensurePaneOpen,
         openSettingsToken: this._openSettingsToken,
         isEditMode: this.displayMode === DisplayMode.Edit,
         isDarkTheme: this._isDarkTheme,
@@ -85,7 +122,42 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
   private _onSettingChange(property: string, value: string): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (this.properties as any)[property] = value;
+    // Write it ourselves first so the editor re-renders against the new value
+    // immediately, then tell the pane, which is what actually gets it saved.
+    // Harmless on the canvas, where the direct write alone would have done.
+    if (this._commitViaPane) {
+      this._commitViaPane(property, value, true);
+    }
     this.render();
+  }
+
+  /**
+   * An invisible property pane field whose only job is to hand us the pane's
+   * change callback.
+   *
+   * Built as a plain object rather than with the `PropertyPaneCustomField`
+   * factory: that factory is exported at runtime but omitted from the package's
+   * public typings (`types` points at index-internal.d.ts; the factory lives in
+   * index-internal-beta.d.ts), so importing it does not compile. The field
+   * SHAPE is fully public, so this needs no cast and no beta import.
+   */
+  private _commitChannelField(): IPropertyPaneField<IPropertyPaneCustomFieldProps> {
+    return {
+      type: PropertyPaneFieldType.Custom,
+      targetProperty: 'settingsCommitChannel',
+      shouldFocus: false,
+      properties: {
+        key: 'settingsCommitChannel',
+        onRender: (_domElement, _ctx, changeCallback): void => {
+          this._commitViaPane = changeCallback;
+        },
+        onDispose: (): void => {
+          // The pane closed, so the callback is dead. Clearing it stops us
+          // calling a stale closure and believing a change was saved.
+          this._commitViaPane = undefined;
+        }
+      }
+    };
   }
 
   protected getPropertyPaneConfiguration(): IPropertyPaneConfiguration {
@@ -102,11 +174,35 @@ export default class OntologyEditorWebPart extends BaseClientSideWebPart<IOntolo
                 // This button stays because the pattern note is explicit that the
                 // property pane must keep a working way in: it is the supported
                 // fallback if the in-page entry points ever fail.
+                // Renders nothing. It exists only to hand us the pane's change
+                // callback; see _commitViaPane. Kept first so it mounts before
+                // anything an author can touch.
+                this._commitChannelField(),
                 PropertyPaneLabel('settingsHint', {
-                  text: 'Settings have moved into the editor itself, where folders ' +
-                        'and files can be browsed rather than typed. Use the Settings ' +
-                        'button in the editor — beside Walkthrough on the opening ' +
-                        'screen, and in the command bar once an ontology is open.'
+                  text: 'Folders and files can be browsed, rather than typed, from the ' +
+                        'Settings button in the editor — beside Walkthrough on the opening ' +
+                        'screen, and in the command bar once an ontology is open. The fields ' +
+                        'below are the typed fallback.'
+                }),
+                // TYPED FALLBACK — and, on a single-part App Page, currently the only
+                // path that stands any chance of persisting at all. A change made in the
+                // editor's own panel writes this.properties directly, which the modern
+                // CANVAS picks up via its own dirty-bit polling but the App Page host
+                // does not: Save there writes nothing and the page version does not even
+                // move. These fields exist to establish whether a pane-originated change
+                // fares any better on that host. See
+                // notes/sharepoint-custom-config-panel-pattern.md.
+                PropertyPaneTextField('libraryFolder', {
+                  label: 'Library folder',
+                  description: 'Server-relative path. Blank uses Shared Documents/Ontology.'
+                }),
+                PropertyPaneTextField('publishFolder', {
+                  label: 'Publish folder',
+                  description: 'Where Publish writes the reader\u2019s copy. May be on another site.'
+                }),
+                PropertyPaneTextField('databaseUrl', {
+                  label: 'Database URL',
+                  description: 'A .sqlite to open on load. Blank shows the picker.'
                 }),
                 PropertyPaneButton('openSettings', {
                   text: 'Open settings',

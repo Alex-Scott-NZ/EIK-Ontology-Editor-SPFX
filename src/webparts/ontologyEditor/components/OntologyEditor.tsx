@@ -81,7 +81,7 @@ const PHASE_TEXT: { [k in ImportPhase]: string } = {
 };
 
 const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
-  const { databaseUrl, libraryFolder, publishFolder, context, onPropertyChange, openSettingsToken, isEditMode } = props;
+  const { databaseUrl, libraryFolder, publishFolder, context, onPropertyChange, onSettingsOpened, openSettingsToken, isEditMode } = props;
 
   const [stage, setStage] = React.useState<Stage>('choosing');
   const [progress, setProgress] = React.useState<string>('');
@@ -102,6 +102,18 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   React.useEffect(() => {
     if (openSettingsToken) setSettingsOpen(true);
   }, [openSettingsToken]);
+
+  // Opening the panel opens the property pane too, behind it and out of sight.
+  // The pane is what actually persists a change on a single-part App Page, and
+  // the callback that does it exists only while the pane is rendered.
+  //
+  // Deliberately keyed on `settingsOpen` alone: the handler is a fresh closure
+  // on every render, so including it would re-run this on each keystroke and
+  // re-open the pane continuously.
+  React.useEffect(() => {
+    if (settingsOpen && onSettingsOpened) onSettingsOpened();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsOpen]);
 
   // Settings are only reachable while the page can be saved. Leaving edit mode
   // with the panel open would strand it over a page whose properties can no

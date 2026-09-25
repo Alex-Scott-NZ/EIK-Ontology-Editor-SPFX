@@ -21,6 +21,18 @@ export interface IOntologyEditorProps {
    * not supply one, and the settings command hides itself when it is.
    */
   onPropertyChange?: (property: string, value: string) => void;
+  /**
+   * Called whenever the settings panel is opened.
+   *
+   * On a single-part App Page the host ignores direct writes to
+   * `this.properties` — only a change originating in the PROPERTY PANE is
+   * persisted. The web part therefore commits through a callback the pane
+   * hands it, and that callback only exists while the pane is rendered. This
+   * asks the web part to make sure the pane is open, so the commit channel is
+   * live before the author changes anything. The pane sits behind the settings
+   * panel and is never seen.
+   */
+  onSettingsOpened?: () => void;
   /** Increments when the property pane's button asks for the settings panel. */
   openSettingsToken?: number;
   /** True when the PAGE is in edit mode, so property changes can be persisted. */
