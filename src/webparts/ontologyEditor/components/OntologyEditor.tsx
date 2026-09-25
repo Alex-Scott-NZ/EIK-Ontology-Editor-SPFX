@@ -1131,7 +1131,6 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
               : `${publishFolderUrl}/${fileName}`);
         return (
           <PublishDialog
-            target={publishState ? publishState.target : undefined}
             suggestion={suggested}
             unpublishedChanges={publishState ? publishState.unpublishedChanges : 0}
             publishedAt={publishState ? publishState.publishedAt : undefined}

@@ -852,9 +852,18 @@ export const ExportBranchDialog: React.FC<{
 /* ------------------------------------------------------------- publish -- */
 
 export const PublishDialog: React.FC<{
-  /** Where this ontology currently publishes, if set. */
-  target?: string;
-  /** Suggested target when none is set yet. */
+  /**
+   * Where to publish, already resolved by the caller.
+   *
+   * There used to be a `target` prop as well — the location stored in the file
+   * — and this dialog started from `target || suggestion`. That quietly re-made
+   * a decision the caller had already made: the caller prefers the CONFIGURED
+   * publish folder over the stored one, and this undid it, so for any ontology
+   * that had ever been published (i.e. every real one) changing the setting
+   * appeared to do nothing and Publish kept offering the master folder.
+   *
+   * One decision, in one place. The caller owns the precedence.
+   */
   suggestion: string;
   unpublishedChanges: number;
   publishedAt?: string;
@@ -871,9 +880,9 @@ export const PublishDialog: React.FC<{
   problems?: IIntegrityProblem[];
   /** Select and reveal the concept a problem points at, then close this dialog. */
   onGoToProblem?: (problem: IIntegrityProblem) => void;
-}> = ({ target, suggestion, unpublishedChanges, publishedAt, publishedBy,
+}> = ({ suggestion, unpublishedChanges, publishedAt, publishedBy,
         unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem }) => {
-  const [url, setUrl] = React.useState(target || suggestion);
+  const [url, setUrl] = React.useState(suggestion);
   const [copied, setCopied] = React.useState(false);
   // Not a regex: SharePoint library names routinely contain spaces
   // ("Shared Documents"), apostrophes and ampersands. Parse it instead and
