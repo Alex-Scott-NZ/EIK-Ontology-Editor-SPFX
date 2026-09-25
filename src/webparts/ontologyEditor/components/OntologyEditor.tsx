@@ -204,6 +204,14 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     else if (/\.ttl$/i.test(base)) setFileName(base.replace(/\.ttl$/i, '.sqlite'));
     else setFileName('ontology.sqlite');
     setSelectedId(undefined);
+    // Findings belong to the ontology they were found in. They used to be
+    // cleared only when a publish started, so opening a DIFFERENT ontology kept
+    // the previous one's problems in state and the publish dialog listed them
+    // against the new file — naming concepts it does not contain, and sending
+    // "Go to" to concept ids that mean something else here, or nothing at all.
+    // Nothing about the previous ontology survives this point.
+    setIntegrityProblems([]);
+    setDialogError(undefined);
     // A reopened database carries its journal (the audit trail); everything in
     // it was saved by definition, so the unsaved baseline starts there.
     setPendingChanges(w.getChangeCount());
