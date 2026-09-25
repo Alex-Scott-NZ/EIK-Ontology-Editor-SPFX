@@ -1344,6 +1344,50 @@ export class OntologyWriter {
   // file, so they travel with the ontology rather than with the page it is
   // opened on.
 
+  /**
+   * What this ontology calls its hierarchy.
+   *
+   * "Broader"/"Narrower" is SKOS vocabulary and reads oddly for an ontology of,
+   * say, business processes, where "Parent"/"Child" is what people say. The
+   * words belong to the ONTOLOGY rather than to a page showing it: the editor
+   * and the viewer both render the same hierarchy, so a web part property would
+   * fix one and leave the other saying something else.
+   *
+   * Stored in import_metadata because that table exists in every .sqlite already
+   * saved. A new table would not, so every existing ontology would need
+   * migrating before it could be opened.
+   *
+   * Absent means the SKOS defaults, so files written before this existed behave
+   * exactly as they did.
+   */
+  public getHierarchyLabels(): { broader: string; narrower: string } {
+    const get = (k: string): string | undefined => {
+      const v = this._one('SELECT value FROM import_metadata WHERE key = ?', [k]);
+      return v === undefined || v === null || String(v).trim() === '' ? undefined : String(v);
+    };
+    return {
+      broader: get('hierarchy_label_broader') || 'Broader',
+      narrower: get('hierarchy_label_narrower') || 'Narrower'
+    };
+  }
+
+  public setHierarchyLabels(broader: string, narrower: string): void {
+    const before = this.getHierarchyLabels();
+    const b = (broader || '').trim() || 'Broader';
+    const n = (narrower || '').trim() || 'Narrower';
+    this._run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
+      ['hierarchy_label_broader', b]);
+    this._run('INSERT OR REPLACE INTO import_metadata (key, value) VALUES (?, ?)',
+      ['hierarchy_label_narrower', n]);
+    // Journalled as 'broader' because that is what the words describe, and
+    // because the changes table's CHECK constraint is baked into every saved
+    // file — a new entity type could not be written to an existing ontology.
+    // Journalling also makes it count as an unsaved change, so it cannot be
+    // typed and then quietly lost.
+    this._journal('update', 'broader', undefined, { setting: 'hierarchyLabels', from: before, to: { broader: b, narrower: n } });
+    this._dirty = true;
+  }
+
   /** Where this ontology publishes to, if it has been set. */
   public getPublishTarget(): string | undefined {
     const v = this._one("SELECT value FROM import_metadata WHERE key = 'publish_target'");

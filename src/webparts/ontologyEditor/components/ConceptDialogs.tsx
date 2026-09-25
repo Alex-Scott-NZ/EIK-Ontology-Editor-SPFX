@@ -12,6 +12,7 @@ import {
 } from '../../../services/database/OntologyWriter';
 import { IConcept, ILabel } from '../../../models/IOntology';
 import { localName } from '../../../services/turtle/Vocabulary';
+import type { IIntegrityProblem } from '../../../services/database/IntegrityReport';
 
 /* ------------------------------------------------------------------ new -- */
 
@@ -863,9 +864,17 @@ export const PublishDialog: React.FC<{
   onCancel: () => void;
   error?: string;
   busy?: string;
+  /**
+   * Set when the integrity checks refused the publish. One entry per problem:
+   * "relationships with missing source = 2" is a count an author cannot act on.
+   */
+  problems?: IIntegrityProblem[];
+  /** Select and reveal the concept a problem points at, then close this dialog. */
+  onGoToProblem?: (problem: IIntegrityProblem) => void;
 }> = ({ target, suggestion, unpublishedChanges, publishedAt, publishedBy,
-        unsavedChanges, onPublish, onCancel, error, busy }) => {
+        unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem }) => {
   const [url, setUrl] = React.useState(target || suggestion);
+  const [copied, setCopied] = React.useState(false);
   // Not a regex: SharePoint library names routinely contain spaces
   // ("Shared Documents"), apostrophes and ampersands. Parse it instead and
   // check the shape — an https URL with at least a folder and a file name.
@@ -896,6 +905,86 @@ export const PublishDialog: React.FC<{
       minWidth={620}
     >
       {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+
+      {problems && problems.length > 0 && (
+        <div style={{ marginTop: 8, border: '1px solid #8a8886', borderRadius: 2 }}>
+          <div style={{
+            padding: '6px 10px', background: '#faf9f8', borderBottom: '1px solid #8a8886',
+            fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8
+          }}>
+            <span style={{ flex: 1 }}>
+              {problems.length === 1 ? '1 problem found' : `${problems.length} problems found`}
+            </span>
+            {/* The database cannot always leave the machine it is on, so the
+                report has to be copyable as text. */}
+            <DefaultButton
+              text={copied ? 'Copied' : 'Copy details'}
+              iconProps={{ iconName: copied ? 'CheckMark' : 'Copy' }}
+              styles={{ root: { height: 28 } }}
+              onClick={() => {
+                const report = [
+                  'Ontology integrity report',
+                  `generated: ${new Date().toISOString()}`,
+                  `problems : ${problems.length}`,
+                  '',
+                  ...problems.map((p, i) =>
+                    [
+                      `${i + 1}. [${p.check}]`,
+                      `   ${p.description}`,
+                      `   anchor concept id: ${p.conceptId === undefined ? '(none survived)' : p.conceptId}`,
+                      p.rowId === undefined ? undefined : `   row id: ${p.rowId}`
+                    ].filter(Boolean).join('\n')
+                  )
+                ].join('\n');
+                const fallback = (): void => {
+                  const ta = document.createElement('textarea');
+                  ta.value = report;
+                  ta.style.position = 'fixed';
+                  ta.style.opacity = '0';
+                  document.body.appendChild(ta);
+                  ta.select();
+                  try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+                };
+                const done = (): void => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
+                // navigator.clipboard needs a secure context and can be blocked
+                // by policy; the textarea route works where it is not available.
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(report).then(done, () => { fallback(); done(); });
+                } else {
+                  fallback(); done();
+                }
+              }}
+            />
+          </div>
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {problems.map((p, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px',
+                  borderBottom: i === problems.length - 1 ? 'none' : '1px solid #edebe9'
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13 }}>{p.description}</div>
+                  <div style={{ fontSize: 11, color: '#605e5c', marginTop: 2 }}>
+                    {p.check}{p.rowId === undefined ? '' : ` · row ${p.rowId}`}
+                  </div>
+                </div>
+                {/* No button when nothing survived to select — the concept is gone. */}
+                {p.conceptId !== undefined && onGoToProblem && (
+                  <DefaultButton
+                    text="Go to"
+                    disabled={!!busy}
+                    onClick={() => onGoToProblem(p)}
+                    styles={{ root: { minWidth: 64, height: 28 } }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {unsavedChanges > 0 && (
         <MessageBar messageBarType={MessageBarType.warning} isMultiline>

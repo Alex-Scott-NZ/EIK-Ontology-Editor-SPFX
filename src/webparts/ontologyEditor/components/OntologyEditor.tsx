@@ -13,12 +13,14 @@ import ConceptList from './ConceptList';
 import ModelManager from './ModelManager';
 import ConceptDetailPane from './ConceptDetail';
 import { WalkthroughPanel } from './WalkthroughPanel';
+import SettingsPanel from './SettingsPanel';
 
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { exportTurtle } from '../../../services/export/TurtleExporter';
 import { getSqlJs } from '../../../services/database/sqlJsLoader';
 import { OntologyWriter, ValidationFailure, ILabelFlagEdit, IAttachStats, IPublishState } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase, runChecks, INTEGRITY_CHECKS } from '../../../services/import/OntologyImporter';
+import { describeIntegrityProblems, IIntegrityProblem } from '../../../services/database/IntegrityReport';
 import {
   FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes,
   defaultOntologyFolder, parsePublishTarget
@@ -79,7 +81,7 @@ const PHASE_TEXT: { [k in ImportPhase]: string } = {
 };
 
 const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
-  const { databaseUrl, libraryFolder, context } = props;
+  const { databaseUrl, libraryFolder, publishFolder, context, onPropertyChange, openSettingsToken, isEditMode } = props;
 
   const [stage, setStage] = React.useState<Stage>('choosing');
   const [progress, setProgress] = React.useState<string>('');
@@ -93,6 +95,20 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [mainView, setMainView] = React.useState<MainView>('concepts');
   const [browse, setBrowse] = React.useState<BrowseMode>('tree');
   const [walkthroughOpen, setWalkthroughOpen] = React.useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = React.useState<boolean>(false);
+
+  // The property pane's "Open settings" button bumps a counter rather than
+  // setting a flag, so clicking it again re-opens a panel the author closed.
+  React.useEffect(() => {
+    if (openSettingsToken) setSettingsOpen(true);
+  }, [openSettingsToken]);
+
+  // Settings are only reachable while the page can be saved. Leaving edit mode
+  // with the panel open would strand it over a page whose properties can no
+  // longer be persisted.
+  React.useEffect(() => {
+    if (!isEditMode) setSettingsOpen(false);
+  }, [isEditMode]);
   const [search, setSearch] = React.useState<string>('');
   const [selectedId, setSelectedId] = React.useState<number | undefined>(undefined);
   const [revealPath, setRevealPath] = React.useState<number[] | undefined>(undefined);
@@ -118,6 +134,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
   const [publishState, setPublishState] = React.useState<IPublishState | undefined>(undefined);
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
   const [dialogError, setDialogError] = React.useState<string | undefined>(undefined);
+  // Per-problem detail behind a failed integrity check, so the author can act on it.
+  const [integrityProblems, setIntegrityProblems] = React.useState<IIntegrityProblem[]>([]);
   // Views memoise their queries; bumping this refetches after a mutation.
   const [refreshToken, setRefreshToken] = React.useState<number>(0);
   const [pendingChanges, setPendingChanges] = React.useState<number>(0);
@@ -135,6 +153,26 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       || (context ? defaultOntologyFolder(context) : ''),
     [libraryFolder, context]
   );
+
+  /**
+   * Absolute URL of the folder Publish writes to.
+   *
+   * Blank `publishFolder` keeps the original behaviour — publish beside the
+   * master — because changing that silently would move where existing
+   * installations write. Set it, and the published copy separates from the
+   * working file; make it a full https URL and it can leave this site entirely,
+   * which is what an author-restricted editor site and a read-for-all viewer
+   * site will need.
+   */
+  const publishFolderUrl = React.useMemo((): string => {
+    const origin = context ? new URL(context.pageContext.web.absoluteUrl).origin : '';
+    const setting = (publishFolder || '').trim().replace(/\/+$/, '');
+    if (/^https?:\/\//i.test(setting)) return setting;
+    if (setting) return `${origin}${setting.startsWith('/') ? '' : '/'}${setting}`;
+    // Unset: the historical suggestion, built from the library folder.
+    const tail = effectiveFolder.split('/').filter(Boolean).slice(-2).join('/') || 'Shared Documents/Ontology';
+    return `${context ? context.pageContext.web.absoluteUrl : ''}/${tail}`;
+  }, [publishFolder, effectiveFolder, context]);
 
   const adopt = React.useCallback((database: OntologyDatabase, label: string): void => {
     setDb(database);
@@ -367,16 +405,51 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
    * The target and the journal position it was published from are recorded IN
    * the file, so the ontology carries its own publishing history.
    */
+  /**
+   * Jump to the concept an integrity problem points at: select it, expand the
+   * tree to it, and close the dialog so it is visible. The problem's own broken
+   * end cannot be shown — it is a concept that no longer exists — so this lands
+   * on the end that survived, which is where the author has to act anyway.
+   */
+  const goToProblem = React.useCallback((problem: IIntegrityProblem): void => {
+    if (!db || problem.conceptId === undefined) return;
+    setSelectedId(problem.conceptId);
+    setRevealPath(db.getAncestorPath(problem.conceptId));
+    closeDialog();
+  }, [db, closeDialog]);
+
   const publishToViewer = React.useCallback(async (target: string): Promise<void> => {
     if (!db || !writer || !fileService) return;
     setPublishBusy('Checking the ontology…');
     try {
       setDialogError(undefined);
+      setIntegrityProblems([]);
       await yieldToBrowser();
+
+      // Publishing onto the master would collapse the two files into one, and
+      // with them the whole point of the split: the master is the work in
+      // progress, the published copy is what readers see. The default target
+      // used to be exactly the master's own path, so this was one Enter away.
+      const masterPath = revertSource && revertSource.path ? revertSource.path : undefined;
+      if (masterPath) {
+        let targetPath: string | undefined;
+        try { targetPath = decodeURIComponent(new URL(target.trim()).pathname); } catch { targetPath = undefined; }
+        if (targetPath && targetPath.toLowerCase() === masterPath.toLowerCase()) {
+          throw new Error(
+            'That is the master file this ontology was opened from, so publishing ' +
+            'there would overwrite your working copy with itself. Publish to a ' +
+            'different file — ideally a folder readers can see and authors cannot ' +
+            'edit. The Publish folder property sets the default.'
+          );
+        }
+      }
 
       // Never send a structurally broken ontology organisation-wide.
       const failures = runChecks(db.raw, INTEGRITY_CHECKS).filter(c => !c.ok);
       if (failures.length) {
+        // The counts refuse the publish; the detail is what lets the author fix
+        // it. Gathered only on failure, so the happy path pays nothing for it.
+        setIntegrityProblems(describeIntegrityProblems(db.raw));
         throw new Error(
           'Integrity checks failed, so nothing was published: ' +
           failures.map(f => `${f.label} = ${f.value}`).join('; ')
@@ -722,7 +795,19 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       title: 'Step-by-step guide: build an ontology from scratch (floats over the editor)',
       checked: walkthroughOpen,
       onClick: () => setWalkthroughOpen(o => !o)
-    }
+    },
+    // A full-page web part has nothing else on the page to select, so the
+    // toolbar gear the pattern note describes is unnecessary here: this IS the
+    // entry point. The standard property pane still works as the fallback.
+    ...(onPropertyChange && isEditMode ? [{
+      key: 'settings',
+      text: settingsOpen ? 'Close settings' : 'Settings',
+      iconProps: { iconName: 'Settings' },
+      title: 'Library folder, publish folder and startup database',
+      checked: settingsOpen,
+      ariaLabel: settingsOpen ? 'Close settings' : 'Open settings',
+      onClick: () => setSettingsOpen(o => !o)
+    }] : [])
   ];
 
   // -- Render ----------------------------------------------------------------
@@ -752,8 +837,36 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
           >
             Walkthrough: build an ontology from scratch
           </ActionButton>
+          {/* Same reasoning as the walkthrough link above: the settings are
+              needed MOST from here. This is where you set the library folder
+              the picker browses, and the startup database that would stop you
+              landing on this screen at all — so reaching them only from the
+              loaded-editor command bar is backwards. */}
+          {onPropertyChange && isEditMode && (
+            <ActionButton
+              iconProps={{ iconName: 'Settings' }}
+              checked={settingsOpen}
+              ariaLabel={settingsOpen ? 'Close settings' : 'Open settings'}
+              onClick={() => setSettingsOpen(o => !o)}
+            >
+              {settingsOpen ? 'Close settings' : 'Settings'}
+            </ActionButton>
+          )}
         </div>
         {walkthroughOpen && <WalkthroughPanel onClose={() => setWalkthroughOpen(false)} />}
+        {onPropertyChange && isEditMode && (
+          <SettingsPanel
+            isOpen={settingsOpen}
+            onDismiss={() => setSettingsOpen(false)}
+            fileService={fileService}
+            siteUrl={context ? context.pageContext.web.absoluteUrl : ''}
+            libraryFolder={libraryFolder || ''}
+            publishFolder={publishFolder || ''}
+            databaseUrl={databaseUrl || ''}
+            isEditMode={!!isEditMode}
+            onPropertyChange={onPropertyChange}
+          />
+        )}
         <SourcePicker
           libraryFolder={effectiveFolder}
           onBrowseLibrary={
@@ -787,6 +900,20 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
       )}
 
       <CommandBar items={commands} farItems={farCommands} className={styles.commandBar} />
+
+      {onPropertyChange && isEditMode && (
+        <SettingsPanel
+          isOpen={settingsOpen}
+          onDismiss={() => setSettingsOpen(false)}
+          fileService={fileService}
+          siteUrl={context ? context.pageContext.web.absoluteUrl : ''}
+          libraryFolder={libraryFolder || ''}
+          publishFolder={publishFolder || ''}
+          databaseUrl={databaseUrl || ''}
+          isEditMode={!!isEditMode}
+          onPropertyChange={onPropertyChange}
+        />
+      )}
       {walkthroughOpen && <WalkthroughPanel onClose={() => setWalkthroughOpen(false)} />}
 
       {stats && (
@@ -980,9 +1107,16 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
         );
 
       case 'publish': {
-        const suggested = publishState && publishState.target
-          ? publishState.target
-          : `${context ? context.pageContext.web.absoluteUrl : ''}/${(effectiveFolder.split('/').filter(Boolean).slice(-2).join('/')) || 'Shared Documents/Ontology'}/${fileName}`;
+        // A configured publish folder WINS over the target stored in the file.
+        // The stored target is where this ontology last went; the setting is
+        // where the author has now said published copies belong. Preferring the
+        // stored one made changing the setting do nothing for any ontology that
+        // had ever been published — which is every real one.
+        const suggested = publishFolder && publishFolder.trim()
+          ? `${publishFolderUrl}/${fileName}`
+          : (publishState && publishState.target
+              ? publishState.target
+              : `${publishFolderUrl}/${fileName}`);
         return (
           <PublishDialog
             target={publishState ? publishState.target : undefined}
@@ -993,6 +1127,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             unsavedChanges={unsaved}
             error={dialogError}
             busy={publishBusy}
+            problems={integrityProblems}
+            onGoToProblem={goToProblem}
             onCancel={closeDialog}
             onPublish={(t) => { void publishToViewer(t); }}
           />

@@ -376,14 +376,27 @@ export class OntologyDatabase {
    * Reads v_concept_links so a stored row and its mirror are always consistent.
    */
   public getLinks(conceptId: number): IConceptLink[] {
-    return this._rows(
+    const links: IConceptLink[] = this._rows(
+      // LEFT JOINs so a relationship whose other end no longer exists still
+      // comes back. It used to be dropped by an inner join, which meant the
+      // one row an author needs to repair was the one row they could not see —
+      // and publishing refuses because of it.
+      //
+      // The trailing condition preserves the old behaviour everywhere else.
+      // v_concept_links mirrors each relationship, and the mirror of a property
+      // with no declared inverse has a NULL property_id; those rows were dropped
+      // before and should stay hidden, or every one-way relationship would show
+      // a nameless entry on its target. They are surfaced ONLY when the other
+      // concept is missing too, because then the row is a fault to be fixed
+      // rather than a mirror nobody asked for.
       `SELECT v.relationship_id, v.property_id, p.label,
-              v.other_concept_id, o.pref_label, oc.label, v.direction
+              v.other_concept_id, o.pref_label, oc.label, v.direction, o.id
        FROM v_concept_links v
-       JOIN properties p ON p.id = v.property_id
-       JOIN concepts   o ON o.id = v.other_concept_id
-       LEFT JOIN classes oc ON oc.id = o.class_id
+       LEFT JOIN properties p ON p.id = v.property_id
+       LEFT JOIN concepts   o ON o.id = v.other_concept_id
+       LEFT JOIN classes   oc ON oc.id = o.class_id
        WHERE v.concept_id = ?
+         AND (p.id IS NOT NULL OR o.id IS NULL)
        ORDER BY p.label, o.pref_label`,
       [conceptId]
     ).map(r => ({
@@ -393,8 +406,56 @@ export class OntologyDatabase {
       otherConceptId: Number(r[3]),
       otherConceptLabel: str(r[4]),
       otherConceptClass: str(r[5]),
-      direction: String(r[6]) as 'forward' | 'inverse'
+      direction: String(r[6]) as 'forward' | 'inverse',
+      otherConceptMissing: r[7] === null || r[7] === undefined
     }));
+
+    // v_concept_links only mirrors a relationship when its property declares an
+    // inverse (`WHERE p.inverse_property_id IS NOT NULL`). So a ONE-WAY
+    // relationship pointing AT this concept produces no row here at all — and if
+    // its source concept has been deleted, there is no surviving concept the row
+    // can be reached from. It blocks publishing from a place nobody can open.
+    //
+    // Found directly rather than by changing the view: the view is baked into
+    // every .sqlite already saved, so altering the schema would fix new files
+    // and leave existing ones exactly as broken.
+    const inboundOrphans = this._rows(
+      `SELECT r.id, r.property_id, p.label, r.source_concept_id
+       FROM relationships r
+       LEFT JOIN concepts   s ON s.id = r.source_concept_id
+       LEFT JOIN properties p ON p.id = r.property_id
+       WHERE r.target_concept_id = ? AND s.id IS NULL`,
+      [conceptId]
+    ).map(r => ({
+      relationshipId: Number(r[0]),
+      propertyId: Number(r[1]),
+      propertyLabel: str(r[2]),
+      otherConceptId: Number(r[3]),
+      otherConceptLabel: undefined,
+      otherConceptClass: undefined,
+      direction: 'inverse' as const,
+      otherConceptMissing: true
+    }));
+
+    const seen: { [id: number]: true } = {};
+    for (const l of links) seen[l.relationshipId] = true;
+    return links.concat(inboundOrphans.filter(o => !seen[o.relationshipId]));
+  }
+
+  /**
+   * What this ontology calls its hierarchy. Read-only mirror of the writer's
+   * accessor, so display code does not need a writer. Absent = SKOS defaults.
+   */
+  public getHierarchyLabels(): { broader: string; narrower: string } {
+    const get = (k: string): string | undefined => {
+      const r = this._rows('SELECT value FROM import_metadata WHERE key = ?', [k]);
+      const v = r.length ? r[0][0] : undefined;
+      return v === undefined || v === null || String(v).trim() === '' ? undefined : String(v);
+    };
+    return {
+      broader: get('hierarchy_label_broader') || 'Broader',
+      narrower: get('hierarchy_label_narrower') || 'Narrower'
+    };
   }
 
   public getConceptDetail(conceptId: number): IConceptDetail | undefined {

@@ -19,6 +19,11 @@ function odataLiteral(serverRelativePath: string): string {
   return serverRelativePath.replace(/'/g, "''");
 }
 
+export interface ILibraryFolder {
+  name: string;
+  serverRelativeUrl: string;
+}
+
 export interface ILibraryFile {
   name: string;
   serverRelativeUrl: string;
@@ -73,9 +78,9 @@ export class FileService {
    * List files in a library folder, optionally filtered by extension.
    * `folderPath` is server-relative, e.g. /sites/knowledge/Shared Documents/ontology
    */
-  public async listFiles(folderPath: string, extensions?: string[]): Promise<ILibraryFile[]> {
+  public async listFiles(folderPath: string, extensions?: string[], webUrl?: string): Promise<ILibraryFile[]> {
     const url =
-      `${this._webUrl}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
+      `${(webUrl || this._webUrl).replace(/\/+$/, '')}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
       `${encodePath(odataLiteral(folderPath))}')/Files` +
       `?$select=Name,ServerRelativeUrl,Length,TimeLastModified&$orderby=Name`;
 
@@ -109,6 +114,55 @@ export class FileService {
    * every later one failed). Only the LAST segment is created — the parent
    * library must exist, which "Shared Documents" always does.
    */
+  /**
+   * Sub-folders of a folder, on this site or another one.
+   *
+   * `webUrl` exists because the published copy will not live where the master
+   * does: the editing site gets author-only permissions and the viewer site is
+   * readable by everyone. Browsing has to reach across, exactly as
+   * `ensureFolder` and `writeFile` already do when publishing.
+   */
+  public async listFolders(folderPath: string, webUrl?: string): Promise<ILibraryFolder[]> {
+    const web = (webUrl || this._webUrl).replace(/\/+$/, '');
+    const url =
+      `${web}/_api/web/GetFolderByServerRelativePath(decodedurl='` +
+      `${encodePath(odataLiteral(folderPath))}')/Folders` +
+      `?$select=Name,ServerRelativeUrl&$orderby=Name`;
+    const response: SPHttpClientResponse = await this._context.spHttpClient.get(url, SPHttpClient.configurations.v1);
+    if (!response.ok) {
+      throw new Error(`Could not list folders in ${folderPath} (${response.status}). ` +
+        'Check the site URL, that the folder exists, and that you can read it.');
+    }
+    const json = await response.json();
+    return (json.value || [])
+      // Forms holds the library's own view pages; it is never a content folder.
+      .filter((f: { Name: string }) => f.Name !== 'Forms')
+      .map((f: { Name: string; ServerRelativeUrl: string }) => ({
+        name: f.Name, serverRelativeUrl: f.ServerRelativeUrl
+      }));
+  }
+
+  /**
+   * Document libraries on a web, as browsable roots.
+   *
+   * BaseTemplate 101 is a document library; lists cannot hold a .sqlite, and
+   * offering them would produce a folder path that silently fails on write.
+   */
+  public async listLibraries(webUrl?: string): Promise<ILibraryFolder[]> {
+    const web = (webUrl || this._webUrl).replace(/\/+$/, '');
+    const url = `${web}/_api/web/lists?$select=Title,RootFolder/ServerRelativeUrl&$expand=RootFolder` +
+      `&$filter=BaseTemplate eq 101 and Hidden eq false&$orderby=Title`;
+    const response: SPHttpClientResponse = await this._context.spHttpClient.get(url, SPHttpClient.configurations.v1);
+    if (!response.ok) {
+      throw new Error(`Could not list libraries on ${web} (${response.status}). ` +
+        'Check the site URL and that you have access to it.');
+    }
+    const json = await response.json();
+    return (json.value || []).map((l: { Title: string; RootFolder: { ServerRelativeUrl: string } }) => ({
+      name: l.Title, serverRelativeUrl: l.RootFolder.ServerRelativeUrl
+    }));
+  }
+
   public async ensureFolder(serverRelativePath: string, webUrl?: string): Promise<void> {
     const web = (webUrl || this._webUrl).replace(/\/+$/, '');
     const checkUrl =
@@ -163,14 +217,42 @@ export class FileService {
       ? bytes.slice().buffer
       : bytes;
 
-    const response: SPHttpClientResponse = await this._context.spHttpClient.post(
-      url,
-      SPHttpClient.configurations.v1,
-      { body, headers: { 'Content-Type': 'application/octet-stream' } }
-    );
-    if (!response.ok) {
-      throw new Error(`Could not write ${fileName} — HTTP ${response.status} ${response.statusText}`);
+    // 429 and 503 are SharePoint saying "too busy", not "no". They are
+    // documented as retryable and carry Retry-After; treating them as a flat
+    // failure turns a two-second wait into a failed publish. Everything else
+    // fails immediately, because retrying a 403 or a 404 only wastes time.
+    const RETRYABLE = [429, 503];
+    const MAX_ATTEMPTS = 4;
+    let response: SPHttpClientResponse | undefined;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      response = await this._context.spHttpClient.post(
+        url,
+        SPHttpClient.configurations.v1,
+        { body, headers: { 'Content-Type': 'application/octet-stream' } }
+      );
+      if (response.ok) return;
+      if (RETRYABLE.indexOf(response.status) === -1 || attempt === MAX_ATTEMPTS) break;
+
+      // Honour Retry-After when SharePoint sends one; it knows better than a
+      // guess. Otherwise back off 2s, 4s, 8s.
+      const header = response.headers ? response.headers.get('Retry-After') : undefined;
+      const fromHeader = header ? parseInt(header, 10) : NaN;
+      const waitMs = (!isNaN(fromHeader) && fromHeader > 0 && fromHeader <= 60)
+        ? fromHeader * 1000
+        : Math.pow(2, attempt) * 1000;
+      await new Promise<void>(resolve => setTimeout(resolve, waitMs));
     }
+
+    const status = response ? response.status : 0;
+    const statusText = response ? response.statusText : 'no response';
+    throw new Error(
+      RETRYABLE.indexOf(status) === -1
+        ? `Could not write ${fileName} — HTTP ${status} ${statusText}`
+        : `Could not write ${fileName} — SharePoint is throttling this site ` +
+          `(HTTP ${status}), and it did not let up after ${MAX_ATTEMPTS} attempts. ` +
+          `Nothing was written. Wait a minute and publish again.`
+    );
   }
 }
 
