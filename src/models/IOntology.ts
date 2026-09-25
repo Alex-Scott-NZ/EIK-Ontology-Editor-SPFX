@@ -110,6 +110,12 @@ export interface IConceptLink {
   otherConceptLabel: string | undefined;
   otherConceptClass: string | undefined;
   direction: 'forward' | 'inverse';
+  /**
+   * The concept at the other end no longer exists. The relationship is a
+   * dangling row: it blocks publishing and cannot be repaired by re-pointing,
+   * only removed.
+   */
+  otherConceptMissing?: boolean;
 }
 
 /** A relationship type that may legally be used from a given concept. */

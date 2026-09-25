@@ -5,6 +5,8 @@ declare interface IOntologyEditorWebPartStrings {
   DatabaseUrlFieldDescription: string;
   LibraryFolderFieldLabel: string;
   LibraryFolderFieldDescription: string;
+  PublishFolderFieldLabel: string;
+  PublishFolderFieldDescription: string;
 }
 
 declare module 'OntologyEditorWebPartStrings' {

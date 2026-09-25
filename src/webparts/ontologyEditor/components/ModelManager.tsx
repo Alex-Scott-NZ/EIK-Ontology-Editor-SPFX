@@ -267,11 +267,12 @@ const ModelSection: React.FC<{
   icon: string;
   title: string;
   count: string;
-  addLabel: string;
-  onAdd: () => void;
-  filterValue: string;
-  onFilterChange: (v: string) => void;
-  filterPlaceholder: string;
+  // Optional: a settings section has nothing to add and nothing to filter.
+  addLabel?: string;
+  onAdd?: () => void;
+  filterValue?: string;
+  onFilterChange?: (v: string) => void;
+  filterPlaceholder?: string;
   blurb: string;
   open: boolean;
   onToggle: () => void;
@@ -292,26 +293,30 @@ const ModelSection: React.FC<{
       <Icon iconName={p.icon} className={styles.detailSectionIcon} />
       {p.title}
       <span className={styles.countChip}>{p.count}</span>
-      <button
-        type="button"
-        className={styles.rowActionAdd}
-        title={p.addLabel}
-        aria-label={p.addLabel}
-        onClick={(e) => { e.stopPropagation(); p.onAdd(); }}
-      >
-        <Icon iconName="Add" />
-      </button>
+      {p.onAdd && (
+        <button
+          type="button"
+          className={styles.rowActionAdd}
+          title={p.addLabel}
+          aria-label={p.addLabel}
+          onClick={(e) => { e.stopPropagation(); if (p.onAdd) p.onAdd(); }}
+        >
+          <Icon iconName="Add" />
+        </button>
+      )}
     </h3>
     {p.open && (
       <div className={styles.detailSectionBody}>
         <p className={styles.muted}>{p.blurb}</p>
-        <div className={styles.modelSectionFilter}>
-          <SearchBox
-            placeholder={p.filterPlaceholder}
-            value={p.filterValue}
-            onChange={(_, v) => p.onFilterChange(v || '')}
-          />
-        </div>
+        {p.onFilterChange && (
+          <div className={styles.modelSectionFilter}>
+            <SearchBox
+              placeholder={p.filterPlaceholder}
+              value={p.filterValue}
+              onChange={(_, v) => { if (p.onFilterChange) p.onFilterChange(v || ''); }}
+            />
+          </div>
+        )}
         {p.children}
       </div>
     )}
@@ -429,6 +434,18 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
   const countText = (shown: number, total: number): string =>
     shown === total ? String(total) : `${shown} of ${total}`;
 
+  // Terminology is ontology DATA, not page configuration: it travels with the
+  // file and both the editor and the viewer read it. Seeded from the database
+  // and re-seeded whenever a mutation bumps refreshToken.
+  const storedLabels = React.useMemo(() => db.getHierarchyLabels(), [db, refreshToken]);
+  const [broaderWord, setBroaderWord] = React.useState(storedLabels.broader);
+  const [narrowerWord, setNarrowerWord] = React.useState(storedLabels.narrower);
+  React.useEffect(() => {
+    setBroaderWord(storedLabels.broader);
+    setNarrowerWord(storedLabels.narrower);
+  }, [storedLabels.broader, storedLabels.narrower]);
+  const wordsChanged = broaderWord.trim() !== storedLabels.broader || narrowerWord.trim() !== storedLabels.narrower;
+
   return (
     <div className={styles.modelManager}>
       {/* Everything below is long tables — one row of pills to get anywhere. */}
@@ -438,6 +455,7 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
         <button type="button" className={styles.jumpPill} onClick={() => jumpTo('types')}>Relationship types</button>
         <button type="button" className={styles.jumpPill} onClick={() => jumpTo('fields')}>Metadata fields</button>
         <button type="button" className={styles.jumpPill} onClick={() => jumpTo('labeltypes')}>Label types</button>
+        <button type="button" className={styles.jumpPill} onClick={() => jumpTo('terminology')}>Terminology</button>
       </div>
 
       <ModelSection
@@ -562,6 +580,43 @@ const ModelManager: React.FC<IModelManagerProps> = (props) => {
             </tbody>
           </table>
         )}
+      </ModelSection>
+
+      <ModelSection
+        domId="model-terminology" icon="LocaleLanguage" title="Terminology"
+        count=""
+        blurb={'What this ontology calls its hierarchy. "Broader"/"Narrower" is SKOS wording and ' +
+          'reads oddly outside a taxonomy — "Parent"/"Child" may fit better. The words are stored ' +
+          'in the ontology, so the editor and the viewer both use them and they travel with the ' +
+          'file when it is published.'}
+        open={!!openSections.terminology} onToggle={() => setSection('terminology', !openSections.terminology)}
+      >
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <TextField
+            label="Upward (towards parents)"
+            value={broaderWord}
+            onChange={(_, v) => setBroaderWord(v || '')}
+            description="Default: Broader"
+            styles={{ root: { minWidth: 220 } }}
+          />
+          <TextField
+            label="Downward (towards children)"
+            value={narrowerWord}
+            onChange={(_, v) => setNarrowerWord(v || '')}
+            description="Default: Narrower"
+            styles={{ root: { minWidth: 220 } }}
+          />
+          <PrimaryButton
+            text="Apply"
+            disabled={!wordsChanged}
+            onClick={() => { mutate(() => writer.setHierarchyLabels(broaderWord, narrowerWord)); }}
+          />
+          <DefaultButton
+            text="Reset to SKOS"
+            disabled={storedLabels.broader === 'Broader' && storedLabels.narrower === 'Narrower'}
+            onClick={() => { mutate(() => writer.setHierarchyLabels('Broader', 'Narrower')); }}
+          />
+        </div>
       </ModelSection>
 
       <ModelSection

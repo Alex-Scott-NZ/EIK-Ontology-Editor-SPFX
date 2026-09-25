@@ -199,6 +199,10 @@ function savedSplit(): number {
 const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
   const { db, conceptId, onNavigate, classColours, classLabels, edit, refreshToken } = props;
 
+  // The ontology says what its hierarchy is called; SKOS defaults when it does
+  // not, so files written before this existed read exactly as before.
+  const words = React.useMemo(() => db.getHierarchyLabels(), [db, refreshToken]);
+
   const detail: IConceptDetail | undefined = React.useMemo(
     () => db.getConceptDetail(conceptId), [db, conceptId, refreshToken]
   );
@@ -345,16 +349,36 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
             {detail.links.length === 0 && <span className={styles.muted}>None</span>}
             {detail.links.map((l, i) => (
               <div key={`${l.relationshipId}-${l.direction}-${i}`} className={styles.linkRow}>
-                <span className={styles.linkProperty}>{l.propertyLabel}</span>
+                <span className={styles.linkProperty}>
+                  {l.propertyLabel || <em style={{ color: '#a4262c' }}>(unnamed relationship)</em>}
+                </span>
                 <Icon iconName="ChevronRight" className={styles.labelArrow} />
                 <span className={styles.linkTarget}>
-                  <button
-                    type="button"
-                    className={styles.conceptLink}
-                    onClick={() => onNavigate(l.otherConceptId)}
-                  >
-                    {l.otherConceptLabel}
-                  </button>
+                  {l.otherConceptMissing ? (
+                    // Nothing to navigate to, so do not offer a link that would
+                    // go nowhere. Name the fault and what it stops, in the
+                    // author's terms rather than the database's.
+                    <span
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '1px 8px', borderRadius: 2,
+                        background: '#fed9cc', border: '1px solid #a4262c', color: '#a4262c'
+                      }}
+                      title={`This relationship points at concept ${l.otherConceptId}, which has been deleted. ` +
+                             'It cannot be repaired, only removed. It is why publishing is refused.'}
+                    >
+                      <Icon iconName="Warning" />
+                      <span>Missing concept (id {l.otherConceptId})</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.conceptLink}
+                      onClick={() => onNavigate(l.otherConceptId)}
+                    >
+                      {l.otherConceptLabel}
+                    </button>
+                  )}
                   {l.otherConceptClass && (
                     <span
                       className={styles.inlineClassChip}
@@ -370,14 +394,25 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
                     {/* Editing and deleting work from either end: the view
                         carries the id of the single stored row, so there is
                         no half-deleted state to get into. */}
+                    {/* Re-pointing needs a valid other end to start from, which
+                        a dangling row does not have. Removal is the only repair. */}
+                    {!l.otherConceptMissing && (
+                      <RowAction
+                        icon="Edit" title="Change this relationship"
+                        onClick={() => edit.onEditRelationship(l.relationshipId)}
+                      />
+                    )}
                     <RowAction
-                      icon="Edit" title="Change this relationship"
-                      onClick={() => edit.onEditRelationship(l.relationshipId)}
-                    />
-                    <RowAction
-                      icon="Delete" title="Remove this relationship" danger
+                      icon="Delete"
+                      title={l.otherConceptMissing
+                        ? 'Remove this broken relationship'
+                        : 'Remove this relationship'}
+                      danger
                       onClick={() => edit.onDeleteRelationship(
-                        l.relationshipId, `${l.propertyLabel} → ${l.otherConceptLabel}`
+                        l.relationshipId,
+                        l.otherConceptMissing
+                          ? `${l.propertyLabel || 'unnamed relationship'} → a concept that no longer exists (id ${l.otherConceptId})`
+                          : `${l.propertyLabel} → ${l.otherConceptLabel}`
                       )}
                     />
                   </span>
@@ -387,14 +422,14 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
           </Section>
 
           <Section
-            icon="Up" title="Broader Concepts" count={detail.parents.length}
-            addLabel="Select a broader concept"
+            icon="Up" title={`${words.broader} Concepts`} count={detail.parents.length}
+            addLabel={`Select a ${words.broader.toLowerCase()} concept`}
             onAdd={edit ? edit.onAddBroader : undefined}
           >
             {detail.parents.length === 0 && <span className={styles.muted}>None — this is a top concept.</span>}
             {detail.parents.map(p => (
               <div key={p.id} className={styles.linkRow}>
-                <span className={styles.linkProperty}>has broader</span>
+                <span className={styles.linkProperty}>has {words.broader.toLowerCase()}</span>
                 <Icon iconName="ChevronRight" className={styles.labelArrow} />
                 <ConceptChip
                   concept={p}
@@ -415,14 +450,14 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
           </Section>
 
           <Section
-            icon="Down" title="Narrower Concepts" count={detail.childCount}
-            addLabel="Add a narrower concept"
+            icon="Down" title={`${words.narrower} Concepts`} count={detail.childCount}
+            addLabel={`Add a ${words.narrower.toLowerCase()} concept`}
             onAdd={edit ? edit.onAddNarrower : undefined}
           >
             {children.length === 0 && <span className={styles.muted}>None</span>}
             {children.map(c => (
               <div key={c.id} className={styles.linkRow}>
-                <span className={styles.linkProperty}>has narrower</span>
+                <span className={styles.linkProperty}>has {words.narrower.toLowerCase()}</span>
                 <Icon iconName="ChevronRight" className={styles.labelArrow} />
                 <ConceptChip
                   concept={c}
