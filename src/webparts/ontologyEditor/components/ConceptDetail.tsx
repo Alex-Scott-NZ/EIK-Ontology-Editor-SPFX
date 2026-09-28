@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Icon } from '@fluentui/react';
 import styles from './OntologyEditor.module.scss';
+import { classChipColours } from './classChipColours';
 import { OntologyDatabase } from '../../../services/database/OntologyDatabase';
 import { IConcept, IConceptDetail, ILabel, IAnnotation } from '../../../models/IOntology';
 import { localName, SKOSXL_PREF_LABEL } from '../../../services/turtle/Vocabulary';
@@ -139,7 +140,7 @@ const ConceptChip: React.FC<{
     {concept.classId !== undefined && classLabels[concept.classId] && (
       <span
         className={styles.inlineClassChip}
-        style={{ backgroundColor: classColours[concept.classId] || undefined }}
+        style={classChipColours(classColours[concept.classId])}
       >
         {classLabels[concept.classId]}
       </span>
@@ -268,7 +269,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
         <div className={styles.detailColumn} style={{ flex: `0 1 calc(${split}% - 9px)` }}>
           <Section icon="Tag" title="Concept Class">
             {detail.className ? (
-              <span className={styles.classChip} style={{ backgroundColor: colour || undefined }}>
+              <span className={styles.classChip} style={classChipColours(colour)}>
                 {detail.className}
               </span>
             ) : (
@@ -382,7 +383,7 @@ const ConceptDetailPane: React.FC<IConceptDetailProps> = (props) => {
                   {l.otherConceptClass && (
                     <span
                       className={styles.inlineClassChip}
-                      style={{ backgroundColor: colourForClassName(l.otherConceptClass, classLabels, classColours) }}
+                      style={classChipColours(colourForClassName(l.otherConceptClass, classLabels, classColours))}
                     >
                       {l.otherConceptClass}
                     </span>

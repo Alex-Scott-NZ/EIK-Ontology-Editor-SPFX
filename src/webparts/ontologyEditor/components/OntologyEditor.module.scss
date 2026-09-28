@@ -473,10 +473,16 @@
   display: inline-block;
   padding: 4px 12px;
   border-radius: 12px;
+  /* A 1px edge the inline style then tints, so a coloured chip and a neutral
+     one share the same geometry. */
+  border: 1px solid "[theme:neutralQuaternaryAlt, default:#e1dfdd]";
   font-size: 13px;
   font-weight: 600;
+  /* Neutral DEFAULT for a class with no colour. A class WITH one gets fill,
+     text and edge from classChipColours(), derived from the class colour to
+     clear WCAG 1.4.3 - the old fixed dark text assumed every sem:color was
+     pale, and #3535f1 is not. */
   background: "[theme:neutralLighter, default:#f3f2f1]";
-  /* Class colours come from the model (sem:color) and are pale, so keep dark text. */
   color: #1b1a19;
 }
 
@@ -485,7 +491,9 @@
   margin-left: 6px;
   padding: 1px 7px;
   border-radius: 9px;
+  border: 1px solid "[theme:neutralQuaternaryAlt, default:#e1dfdd]";
   font-size: 10px;
+  /* Neutral default; see .classChip for how a coloured one is derived. */
   background: "[theme:neutralLighter, default:#f3f2f1]";
   color: #1b1a19;
   vertical-align: middle;
