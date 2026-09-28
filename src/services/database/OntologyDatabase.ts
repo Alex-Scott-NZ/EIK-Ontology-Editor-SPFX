@@ -288,11 +288,29 @@ export class OntologyDatabase {
    * classId -> `#rrggbb`, for the class chips. Semaphore users navigate by
    * these colours, so they are worth honouring rather than inventing new ones.
    */
+  /**
+   * Colour per class, INHERITED down the class tree.
+   *
+   * Semaphore puts sem:color on the top-level classes only and every subclass
+   * takes its parent's - InlandRevenueModel has 10 coloured classes, all roots,
+   * none with a parent. Reading just the class's own flags left "Group" (a
+   * subclass of Party) with no colour while Party was red. Walk parentClassId
+   * until a colour turns up; a class under an uncoloured root stays absent.
+   */
   public getClassColourMap(): { [classId: number]: string } {
+    const classes = this.getClasses();
+    const byId: { [id: number]: IOntologyClass } = {};
+    classes.forEach(c => { byId[c.id] = c; });
     const out: { [classId: number]: string } = {};
-    for (const cls of this.getClasses()) {
-      const colour = this.getClassColour(cls);
-      if (colour) out[cls.id] = colour;
+    for (const cls of classes) {
+      let cur: IOntologyClass | undefined = cls;
+      const seen: { [id: number]: true } = {};
+      while (cur && !seen[cur.id]) {
+        seen[cur.id] = true;
+        const colour = this.getClassColour(cur);
+        if (colour) { out[cls.id] = colour; break; }
+        cur = cur.parentClassId !== undefined ? byId[cur.parentClassId] : undefined;
+      }
     }
     return out;
   }
