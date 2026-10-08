@@ -893,9 +893,16 @@ export const PublishDialog: React.FC<{
   problems?: IIntegrityProblem[];
   /** Select and reveal the concept a problem points at, then close this dialog. */
   onGoToProblem?: (problem: IIntegrityProblem) => void;
+  /**
+   * Rows belonging only to concepts already deleted. Nothing survives to "Go to",
+   * so they are removed together, here, rather than one at a time.
+   */
+  leftoverCount?: number;
+  onRemoveLeftovers?: () => void;
 }> = ({ suggestion, fileService, siteUrl, storedTarget, onTargetChange,
         unpublishedChanges, publishedAt, publishedBy,
-        unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem }) => {
+        unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem,
+        leftoverCount, onRemoveLeftovers }) => {
   const [url, setUrl] = React.useState(suggestion);
   const [copied, setCopied] = React.useState(false);
   const [browsing, setBrowsing] = React.useState(false);
@@ -1031,6 +1038,25 @@ export const PublishDialog: React.FC<{
               </div>
             ))}
           </div>
+          {!!leftoverCount && onRemoveLeftovers && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+              borderTop: '1px solid #8a8886', background: '#faf9f8'
+            }}>
+              <div style={{ flex: 1, fontSize: 13 }}>
+                {leftoverCount === 1 ? '1 entry belongs' : `${leftoverCount} entries belong`} only
+                to concepts that have already been deleted, so there is nothing to go to.
+                Removing {leftoverCount === 1 ? 'it' : 'them'} loses nothing, and can be undone.
+              </div>
+              <DefaultButton
+                text="Remove leftovers"
+                iconProps={{ iconName: 'Broom' }}
+                disabled={!!busy}
+                onClick={onRemoveLeftovers}
+                styles={{ root: { height: 28 } }}
+              />
+            </div>
+          )}
         </div>
       )}
 

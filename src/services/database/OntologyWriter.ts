@@ -17,6 +17,7 @@
  */
 
 import { Database } from 'sql.js';
+import { LEFTOVERS } from './IntegrityReport';
 import {
   SKOSXL_PREF_LABEL, SKOS_BROADER, RDF_TYPE, RDFS_LABEL,
   OWL_OBJECT_PROPERTY, OWL_CLASS, SKOS_DEFINITION, RDFS_RANGE, SKOSXL_LABEL
@@ -382,6 +383,24 @@ export class OntologyWriter {
     const impact = this.describeDeleteImpact(conceptId);
     this._run('DELETE FROM concepts WHERE id = ?', [conceptId]);
     this._journal('delete', 'concept', uri, impact);
+  }
+
+  /**
+   * Delete every row that belongs only to concepts that no longer exist (see
+   * LEFTOVERS). They are what a save used to strand when foreign keys were
+   * switched off behind the editor's back; nothing survives to show, so they
+   * cannot be removed one at a time. Returns how many rows went.
+   */
+  public removeLeftovers(): number {
+    let total = 0;
+    for (const l of LEFTOVERS) {
+      const n = Number(this._one(`SELECT COUNT(*) FROM ${l.table} WHERE ${l.where}`) || 0);
+      if (!n) continue;
+      this._run(`DELETE FROM ${l.table} WHERE ${l.where}`);
+      this._journal('delete', l.entity, undefined, { leftoversRemoved: n });
+      total += n;
+    }
+    return total;
   }
 
   /** What deleting this concept would take with it. Show before confirming. */

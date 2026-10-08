@@ -29,6 +29,39 @@ export interface IIntegrityProblem {
   rowId?: number;
 }
 
+/**
+ * Rows that belong only to concepts that no longer exist, and so cannot be
+ * fixed one at a time: there is nothing left to select. Removing them loses
+ * nothing. Rows with one SURVIVING end are deliberately not here - those are
+ * fixed by hand from the concept that survived (see `describeIntegrityProblems`).
+ *
+ * A hierarchy edge whose child is gone is a leftover whatever its parent:
+ * the parent's tree never shows it, so there is nothing to act on either way.
+ */
+export const LEFTOVERS: Array<{
+  entity: 'broader' | 'relationship' | 'label' | 'annotation';
+  table: string;
+  where: string;
+}> = [
+  { entity: 'broader', table: 'broader', where: 'concept_id NOT IN (SELECT id FROM concepts)' },
+  {
+    entity: 'relationship', table: 'relationships',
+    where: 'source_concept_id NOT IN (SELECT id FROM concepts) AND target_concept_id NOT IN (SELECT id FROM concepts)'
+  },
+  { entity: 'label', table: 'labels', where: 'concept_id NOT IN (SELECT id FROM concepts)' },
+  { entity: 'annotation', table: 'annotations', where: 'concept_id NOT IN (SELECT id FROM concepts)' }
+];
+
+/** How many leftover rows there are, across every LEFTOVERS table. */
+export function countLeftovers(db: Database): number {
+  let n = 0;
+  for (const l of LEFTOVERS) {
+    const r = db.exec(`SELECT COUNT(*) FROM ${l.table} WHERE ${l.where}`);
+    n += r.length ? Number(r[0].values[0][0]) : 0;
+  }
+  return n;
+}
+
 function rows(db: Database, sql: string): unknown[][] {
   const r = db.exec(sql);
   return r.length ? r[0].values : [];

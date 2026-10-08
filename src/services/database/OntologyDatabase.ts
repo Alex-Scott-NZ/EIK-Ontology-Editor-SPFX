@@ -13,6 +13,7 @@
 import { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import { getSqlJs } from './sqlJsLoader';
 import { SCHEMA_SQL } from './schema';
+import { exportDatabase } from './exportDatabase';
 import {
   IConcept, IConceptDetail, IConceptLink, IAllowedProperty,
   ILabel, IAnnotation, IOntologyClass, IOntologyProperty, IOntologyStats,
@@ -102,9 +103,12 @@ export class OntologyDatabase {
     return this._db;
   }
 
-  /** Serialise for upload back to SharePoint. */
+  /**
+   * Serialise for upload back to SharePoint. Goes through exportDatabase: a bare
+   * sql.js export() turns foreign keys off for the rest of the session.
+   */
   public export(): Uint8Array {
-    return this._db.export();
+    return exportDatabase(this._db);
   }
 
   public close(): void {

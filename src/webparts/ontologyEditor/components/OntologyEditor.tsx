@@ -20,7 +20,7 @@ import { exportTurtle } from '../../../services/export/TurtleExporter';
 import { getSqlJs } from '../../../services/database/sqlJsLoader';
 import { OntologyWriter, ValidationFailure, ILabelFlagEdit, IAttachStats, IPublishState } from '../../../services/database/OntologyWriter';
 import { importTurtle, ImportPhase, runChecks, INTEGRITY_CHECKS } from '../../../services/import/OntologyImporter';
-import { describeIntegrityProblems, IIntegrityProblem } from '../../../services/database/IntegrityReport';
+import { describeIntegrityProblems, countLeftovers, IIntegrityProblem } from '../../../services/database/IntegrityReport';
 import {
   FileService, readLocalFileAsText, readLocalFileAsArrayBuffer, downloadBytes,
   defaultOntologyFolder, parsePublishTarget
@@ -437,6 +437,18 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
     setRevealPath(db.getAncestorPath(problem.conceptId));
     closeDialog();
   }, [db, closeDialog]);
+
+  /**
+   * Clear the rows no problem can be fixed from (see LEFTOVERS), then re-check so
+   * the dialog shows what, if anything, is still wrong. Undoable like any edit.
+   */
+  const removeLeftovers = React.useCallback((): void => {
+    if (!db || !writer) return;
+    if (!mutate(() => { writer.removeLeftovers(); })) return;
+    const remaining = describeIntegrityProblems(db.raw);
+    setIntegrityProblems(remaining);
+    if (remaining.length === 0) setDialogError(undefined);
+  }, [db, writer, mutate]);
 
   const publishToViewer = React.useCallback(async (target: string): Promise<void> => {
     if (!db || !writer || !fileService) return;
@@ -1168,6 +1180,8 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             busy={publishBusy}
             problems={integrityProblems}
             onGoToProblem={goToProblem}
+            leftoverCount={integrityProblems.length ? countLeftovers(db.raw) : 0}
+            onRemoveLeftovers={removeLeftovers}
             onCancel={closeDialog}
             onPublish={(t) => { void publishToViewer(t); }}
           />

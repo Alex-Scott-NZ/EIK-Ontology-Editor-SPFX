@@ -12,7 +12,8 @@
     "compare": "tsx compare-extract.ts",
     "smoke": "tsx scratch-smoke.ts",
     "export": "tsx export-ttl.ts",
-    "roundtrip": "tsx roundtrip-diff.ts"
+    "roundtrip": "tsx roundtrip-diff.ts",
+    "fk": "tsx fk-after-save.ts"
   },
   "dependencies": {
     "eik-ontology-editor": "file:..",
