@@ -18,7 +18,8 @@
     "import-ttl": "npm --prefix tools run import:default",
     "gen:schema": "npm --prefix tools run gen:schema",
     "audit": "npm --prefix tools run audit",
-    "roundtrip": "npm --prefix tools run export && npm --prefix tools run roundtrip"
+    "roundtrip": "npm --prefix tools run export && npm --prefix tools run roundtrip",
+    "regress": "npm --prefix tools run regress"
   },
   "dependencies": {
     "@fluentui/react": "^8.106.4",

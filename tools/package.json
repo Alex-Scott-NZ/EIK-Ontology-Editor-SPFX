@@ -13,7 +13,9 @@
     "smoke": "tsx scratch-smoke.ts",
     "export": "tsx export-ttl.ts",
     "roundtrip": "tsx roundtrip-diff.ts",
-    "fk": "tsx fk-after-save.ts"
+    "fk": "tsx fk-after-save.ts",
+    "regress": "tsx regress.ts",
+    "fixture:damaged": "tsx make-damaged-fixture.ts"
   },
   "dependencies": {
     "eik-ontology-editor": "file:..",

@@ -93,6 +93,8 @@ const check = (name: string, ok: boolean, detail?: string): void => {
   check('unused class deleted', db.exec('SELECT COUNT(*) FROM classes WHERE label=\'Scrap\'')[0].values[0][0] === 0);
   check('changes journalled', w.getChangeCount() >= 12);
 
+  // data/ is gitignored, so a fresh clone does not have it.
+  fs.mkdirSync('../data', { recursive: true });
   fs.writeFileSync('../data/scratch-smoke.sqlite', Buffer.from(db.export()));
   db.close();
 
