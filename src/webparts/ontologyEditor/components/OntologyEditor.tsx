@@ -1176,6 +1176,7 @@ const OntologyEditor: React.FC<IOntologyEditorProps> = (props) => {
             publishedAt={publishState ? publishState.publishedAt : undefined}
             publishedBy={publishState ? publishState.publishedBy : undefined}
             unsavedChanges={unsaved}
+            publishSavesMaster={!!effectiveFolder}
             error={dialogError}
             busy={publishBusy}
             problems={integrityProblems}

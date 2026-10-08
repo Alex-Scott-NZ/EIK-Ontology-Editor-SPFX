@@ -899,10 +899,16 @@ export const PublishDialog: React.FC<{
    */
   leftoverCount?: number;
   onRemoveLeftovers?: () => void;
+  /**
+   * True when publishing will also rewrite the master (the ontology has a
+   * library folder). Then unsaved changes are not a risk worth warning about:
+   * they reach the master and the published copy together.
+   */
+  publishSavesMaster?: boolean;
 }> = ({ suggestion, fileService, siteUrl, storedTarget, onTargetChange,
         unpublishedChanges, publishedAt, publishedBy,
         unsavedChanges, onPublish, onCancel, error, busy, problems, onGoToProblem,
-        leftoverCount, onRemoveLeftovers }) => {
+        leftoverCount, onRemoveLeftovers, publishSavesMaster }) => {
   const [url, setUrl] = React.useState(suggestion);
   const [copied, setCopied] = React.useState(false);
   const [browsing, setBrowsing] = React.useState(false);
@@ -1060,13 +1066,19 @@ export const PublishDialog: React.FC<{
         </div>
       )}
 
-      {unsavedChanges > 0 && (
+      {unsavedChanges > 0 && (publishSavesMaster ? (
+        <MessageBar messageBarType={MessageBarType.info} isMultiline>
+          You have {unsavedChanges} unsaved change{unsavedChanges === 1 ? '' : 's'}.
+          Publishing will include {unsavedChanges === 1 ? 'it' : 'them'} and save
+          {unsavedChanges === 1 ? ' it' : ' them'} to the master as well.
+        </MessageBar>
+      ) : (
         <MessageBar messageBarType={MessageBarType.warning} isMultiline>
           You have {unsavedChanges} unsaved change{unsavedChanges === 1 ? '' : 's'}.
           Publishing sends what is on screen now, including those — but Save
           first if you want the master to match what readers get.
         </MessageBar>
-      )}
+      ))}
 
       {busy ? (
         <Spinner size={SpinnerSize.large} label={busy} />
